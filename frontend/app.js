@@ -4,7 +4,7 @@
  */
 
 // URL del webhook de n8n (reemplaza con tu URL real)
-const WEBHOOK_URL = 'https://jdejose.app.n8n.cloud/webhook/rag-chat-agent';
+const WEBHOOK_URL = 'https://jdejose.app.n8n.cloud/webhook-test/rag-chat-agent';
 
 // Elementos del DOM - obtenemos referencias a los elementos principales
 const chatContainer = document.getElementById('chatContainer');
