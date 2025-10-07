@@ -4,7 +4,7 @@
  */
 
 // URL del webhook de n8n (reemplaza con tu URL real)
-const WEBHOOK_URL = 'TU_WEBHOOK_URL_AQUI';
+const WEBHOOK_URL = 'https://jdejose.app.n8n.cloud/webhook/rag-chat-agent';
 
 // Elementos del DOM - obtenemos referencias a los elementos principales
 const chatContainer = document.getElementById('chatContainer');
@@ -133,6 +133,8 @@ async function sendMessageToWebhook(pregunta) {
     if (WEBHOOK_URL === 'TU_WEBHOOK_URL_AQUI') {
         throw new Error('URL del webhook no configurada. Por favor, actualiza la variable WEBHOOK_URL en app.js');
     }
+    
+    console.log('🌐 Enviando petición a:', WEBHOOK_URL);
     
     try {
         // Realizar petición POST con fetch
@@ -313,6 +315,7 @@ function checkWebhookConfiguration() {
         );
     } else {
         console.log('✅ URL del webhook configurada:', WEBHOOK_URL);
+        console.log('🔗 Conectando con:', WEBHOOK_URL);
     }
 }
 

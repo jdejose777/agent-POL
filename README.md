@@ -70,9 +70,9 @@ PINECONE_INDEX_NAME=nombre-de-tu-indice
 ```
 
 ### Webhook de n8n (Frontend)
-En `frontend/app.js`, reemplaza:
+El webhook ya está configurado en `frontend/app.js`:
 ```javascript
-const WEBHOOK_URL = 'https://tu-n8n-instance.com/webhook/tu-webhook-id';
+const WEBHOOK_URL = 'https://jdejose.app.n8n.cloud/webhook/rag-chat-agent';
 ```
 
 ## 🛠️ Tecnologías Utilizadas

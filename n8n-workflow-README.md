@@ -91,16 +91,16 @@ PINECONE_INDEX_NAME=nombre-de-tu-indice
 
 ## 🔗 URL del Webhook
 
-Una vez importado y activado, n8n te proporcionará una URL similar a:
+Una vez importado y activado, tu webhook está configurado en:
 
 ```
-https://tu-n8n-instance.com/webhook/rag-chat-agent
+https://jdejose.app.n8n.cloud/webhook/rag-chat-agent
 ```
 
-Esta URL es la que debes configurar en el frontend (`app.js`):
+Esta URL ya está configurada en el frontend (`app.js`):
 
 ```javascript
-const WEBHOOK_URL = 'https://tu-n8n-instance.com/webhook/rag-chat-agent';
+const WEBHOOK_URL = 'https://jdejose.app.n8n.cloud/webhook/rag-chat-agent';
 ```
 
 ## 🧪 Pruebas del Workflow
@@ -111,7 +111,7 @@ const WEBHOOK_URL = 'https://tu-n8n-instance.com/webhook/rag-chat-agent';
 3. **Usa Postman o curl** para enviar una petición POST:
 
 ```bash
-curl -X POST https://tu-n8n-instance.com/webhook/rag-chat-agent \
+curl -X POST https://jdejose.app.n8n.cloud/webhook/rag-chat-agent \
   -H "Content-Type: application/json" \
   -d '{"pregunta": "¿Qué dice el documento sobre inteligencia artificial?"}'
 ```
