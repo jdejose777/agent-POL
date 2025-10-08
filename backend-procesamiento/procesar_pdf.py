@@ -11,10 +11,11 @@ from typing import List, Dict
 from dotenv import load_dotenv
 import pdfplumber
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import google.generativeai as genai
 from pinecone import Pinecone, ServerlessSpec
 import requests
 import json
+# Importar sentence-transformers
+from sentence_transformers import SentenceTransformer
 
 
 def cargar_variables_entorno() -> Dict[str, str]:
@@ -116,46 +117,23 @@ def dividir_texto_en_chunks(texto: str, chunk_size: int = 1000, chunk_overlap: i
 
 def generar_embeddings(chunks: List[str], api_key: str) -> List[List[float]]:
     """
-    Genera embeddings para cada fragmento de texto usando Google Gemini
-    
+    Genera embeddings para cada fragmento de texto usando un modelo local de sentence-transformers
     Args:
         chunks: Lista de fragmentos de texto
-        api_key: Clave de API de Google
-        
+        api_key: (No se usa, solo por compatibilidad)
     Returns:
         Lista de embeddings (vectores)
     """
-    print(f"🤖 Generando embeddings para {len(chunks)} fragmentos con Google Gemini...")
-    
+    print("Cargando modelo de embeddings local (all-MiniLM-L6-v2)...")
     try:
-        # Configurar Google Generative AI
-        genai.configure(api_key=api_key)
-        embeddings = []
-        
-        # Generar embeddings uno por uno (Google tiene límites más estrictos)
-        for i, chunk in enumerate(chunks):
-            print(f"   Procesando fragmento {i+1}/{len(chunks)}...")
-            
-            # Llamar a la API de Google Gemini para generar embeddings
-            result = genai.embed_content(
-                model="models/embedding-001",  # Modelo de embeddings de Google
-                content=chunk,
-                task_type="retrieval_document"  # Tipo de tarea para documentos
-            )
-            
-            # Extraer el embedding de la respuesta
-            embedding = result['embedding']
-            embeddings.append(embedding)
-            
-            # Pequeña pausa para evitar rate limiting
-            import time
-            time.sleep(0.1)
-        
+        model = SentenceTransformer('all-MiniLM-L6-v2')
+        print("Modelo cargado.")
+        print(f"Generando embeddings para {len(chunks)} fragmentos...")
+        embeddings = model.encode(chunks, show_progress_bar=True)
         print(f"✅ Embeddings generados correctamente ({len(embeddings)} vectores)")
         return embeddings
-    
     except Exception as e:
-        raise Exception(f"❌ Error al generar embeddings con Google Gemini: {str(e)}")
+        raise Exception(f"❌ Error al generar embeddings con sentence-transformers: {str(e)}")
 
 
 def subir_a_pinecone(
