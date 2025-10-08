@@ -19,7 +19,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n// Este nodo toma la pregunta del usuario y genera su embedding usando Google Gemini\n\n// Obtener la pregunta del webhook\nconst pregunta = $input.first().json.body.pregunta;\n\nif (!pregunta) {\n  throw new Error('❌ No se recibió una pregunta válida');\n}\n\nconsole.log('📝 Pregunta recibida:', pregunta);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada en las variables de entorno');\n}\n\n// Función para generar embedding con Google Gemini\nasync function generarEmbedding(texto) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/embedding-001:embedContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      content: {\n        parts: [{ text: texto }]\n      },\n      taskType: 'RETRIEVAL_QUERY'\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.embedding.values;\n}\n\n// Generar el embedding\nconst embedding = await generarEmbedding(pregunta);\n\nconsole.log('✅ Embedding generado correctamente con Google Gemini');\nconsole.log('📊 Dimensiones del embedding:', embedding.length);\n\n// Devolver los datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  embedding: embedding,\n  timestamp: new Date().toISOString()\n};"
+        "jsCode": "// 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n// Este nodo toma la pregunta del usuario y genera su embedding usando sentence-transformers local\n\n// Obtener la pregunta del webhook\nconst pregunta = $input.first().json.body.pregunta;\n\nif (!pregunta) {\n  throw new Error('❌ No se recibió una pregunta válida');\n}\n\nconsole.log('📝 Pregunta recibida:', pregunta);\n\n// Función para generar embedding usando sentence-transformers con Python subprocess\nasync function generarEmbedding(texto) {\n  // Script Python para generar embedding\n  const pythonScript = `\nimport sys\nimport json\nfrom sentence_transformers import SentenceTransformer\n\n# Cargar modelo\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\n# Obtener texto del argumento\ntexto = sys.argv[1]\n\n# Generar embedding\nembedding = model.encode([texto])[0].tolist()\n\n# Devolver como JSON\nprint(json.dumps(embedding))\n`;\n  \n  // Ejecutar Python script\n  const { execSync } = require('child_process');\n  \n  try {\n    // Crear archivo temporal con el script\n    const fs = require('fs');\n    const path = require('path');\n    const tempScript = path.join('/tmp', 'embedding_script.py');\n    \n    fs.writeFileSync(tempScript, pythonScript);\n    \n    // Ejecutar el script\n    const result = execSync(`python ${tempScript} \"${texto.replace(/\"/g, '\\\\\"')}\"`, {\n      encoding: 'utf8',\n      timeout: 30000\n    });\n    \n    // Limpiar archivo temporal\n    fs.unlinkSync(tempScript);\n    \n    // Parsear resultado\n    const embedding = JSON.parse(result.trim());\n    \n    return embedding;\n    \n  } catch (error) {\n    throw new Error(`❌ Error generando embedding: ${error.message}`);\n  }\n}\n\n// Generar el embedding\nconst embedding = await generarEmbedding(pregunta);\n\nconsole.log('✅ Embedding generado correctamente con sentence-transformers');\nconsole.log('📊 Dimensiones del embedding:', embedding.length);\n\n// Devolver los datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  embedding: embedding,\n  timestamp: new Date().toISOString()\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -28,8 +28,8 @@
         300
       ],
       "id": "embed-generator-node",
-      "name": "🧠 Generar Embedding",
-      "notes": "Convierte la pregunta del usuario en embedding usando OpenAI"
+      "name": "🧠 Generar Embedding Local",
+      "notes": "Convierte la pregunta del usuario en embedding usando sentence-transformers"
     },
     {
       "parameters": {
@@ -47,7 +47,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 🤖 NODO 4: GENERAR RESPUESTA CON GOOGLE GEMINI\n// Este nodo construye el prompt final y genera la respuesta usando Gemini\n\n// Obtener datos del nodo anterior\nconst { pregunta, contexto, tieneContexto, numeroResultados } = $input.first().json;\n\nconsole.log('🤖 Generando respuesta para:', pregunta);\nconsole.log('📚 Contexto disponible:', tieneContexto);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada');\n}\n\n// Construir el prompt según si hay contexto o no\nlet promptFinal;\n\nif (tieneContexto) {\n  promptFinal = `Eres un asistente inteligente que responde preguntas basándose en documentos procesados.\n\nCONTEXTO RELEVANTE:\n${contexto}\n\nPREGUNTA DEL USUARIO:\n${pregunta}\n\nINSTRUCCIONES:\n- Responde únicamente basándote en el contexto proporcionado\n- Si la información no está en el contexto, di que no tienes esa información específica\n- Sé claro, conciso y útil\n- Usa un tono profesional pero amigable\n- Si es apropiado, cita partes relevantes del documento\n\nRESPUESTA:`;\n} else {\n  promptFinal = `Eres un asistente inteligente para un sistema RAG (Retrieval-Augmented Generation).\n\nPREGUNTA DEL USUARIO:\n${pregunta}\n\nNo se encontró información relevante en los documentos procesados para responder a esta pregunta específica.\n\nPor favor, responde de manera educada explicando que:\n1. No se encontró información relevante en los documentos disponibles\n2. Sugiere reformular la pregunta o verificar que el documento correcto haya sido procesado\n3. Mantén un tono profesional pero amigable\n\nRESPUESTA:`;\n}\n\n// Función para llamar a Google Gemini\nasync function generarRespuestaGemini(prompt) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      contents: [{\n        parts: [{\n          text: prompt\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.7,\n        topK: 40,\n        topP: 0.95,\n        maxOutputTokens: 500\n      }\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.candidates[0].content.parts[0].text.trim();\n}\n\n// Generar la respuesta\nconst respuestaFinal = await generarRespuestaGemini(promptFinal);\n\nconsole.log('✅ Respuesta generada correctamente con Google Gemini');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: pregunta,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'gemini-1.5-flash'\n  }\n};\n\nreturn respuestaCompleta;"
+        "jsCode": "// 🤖 NODO 4: GENERAR RESPUESTA CON GOOGLE GEMINI\n// Este nodo construye el prompt final y genera la respuesta usando Gemini\n\n// Obtener datos del nodo anterior\nconst { pregunta, contexto, tieneContexto, numeroResultados } = $input.first().json;\n\nconsole.log('🤖 Generando respuesta para:', pregunta);\nconsole.log('📚 Contexto disponible:', tieneContexto);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada');\n}\n\n// Construir el prompt según si hay contexto o no\nlet promptFinal;\n\nif (tieneContexto) {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado.\n\nCONTEXTO DEL CÓDIGO PENAL:\n${contexto}\n\nPREGUNTA:\n${pregunta}\n\nINSTRUCCIONES:\n- Responde basándote únicamente en el contexto del Código Penal proporcionado\n- Si la información no está en el contexto, indícalo claramente\n- Cita los artículos específicos cuando sea posible\n- Usa un lenguaje claro y profesional\n- Si es relevante, menciona las penas asociadas\n\nRESPUESTA:`;\n} else {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español.\n\nPREGUNTA:\n${pregunta}\n\nNo se encontró información específica en el Código Penal para responder a esta pregunta.\n\nResponde educadamente explicando que:\n1. No se encontró información relevante en el Código Penal procesado\n2. Sugiere reformular la pregunta usando términos jurídicos más específicos\n3. Recuerda que solo puedes consultar sobre el Código Penal español\n\nRESPUESTA:`;\n}\n\n// Función para llamar a Google Gemini\nasync function generarRespuestaGemini(prompt) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      contents: [{\n        parts: [{\n          text: prompt\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.3,\n        topK: 20,\n        topP: 0.8,\n        maxOutputTokens: 800\n      }\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.candidates[0].content.parts[0].text.trim();\n}\n\n// Generar la respuesta\nconst respuestaFinal = await generarRespuestaGemini(promptFinal);\n\nconsole.log('✅ Respuesta generada correctamente con Google Gemini');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: pregunta,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'gemini-1.5-flash',\n    dominio: 'codigo-penal-espanol'\n  }\n};\n\nreturn respuestaCompleta;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -56,8 +56,8 @@
         300
       ],
       "id": "openai-response-node",
-      "name": "🤖 Generar Respuesta GPT",
-      "notes": "Crea el prompt final y genera la respuesta usando OpenAI"
+      "name": "⚖️ Asistente Jurídico Gemini",
+      "notes": "Genera respuesta especializada en Código Penal usando Google Gemini"
     },
     {
       "parameters": {
@@ -98,14 +98,14 @@
       "main": [
         [
           {
-            "node": "🧠 Generar Embedding",
+            "node": "🧠 Generar Embedding Local",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "🧠 Generar Embedding": {
+    "🧠 Generar Embedding Local": {
       "main": [
         [
           {
@@ -120,14 +120,14 @@
       "main": [
         [
           {
-            "node": "🤖 Generar Respuesta GPT",
+            "node": "⚖️ Asistente Jurídico Gemini",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "🤖 Generar Respuesta GPT": {
+    "⚖️ Asistente Jurídico Gemini": {
       "main": [
         [
           {
@@ -143,7 +143,7 @@
   "meta": {
     "templateCreationSource": "n8n_agent_rag_chat",
     "instanceId": "8445ee8fb1232b8fb10ebac704619d5ec8c5d77a6bf0cb1d173277b89a3cde54",
-    "description": "🤖 Agente RAG completo para chat inteligente con documentos PDF. Procesa preguntas, busca en Pinecone y genera respuestas contextuales.",
-    "name": "Agent POL - RAG Chat System"
+    "description": "⚖️ Asistente jurídico especializado en Código Penal español. Usa embeddings locales y genera respuestas contextuales con Gemini.",
+    "name": "Agent POL - Asistente Jurídico"
   }
 }
