@@ -4,17 +4,14 @@
 
 Para que el workflow funcione correctamente, necesitas configurar las siguientes variables de entorno en tu instancia de n8n:
 
-### 1. 🤗 Hugging Face API Key
-```
-HUGGINGFACE_API_KEY=tu_hugging_face_api_key_aqui
-```
+### 1. 🐍 Python Environment
+**Ya no necesitas API Key externa!**
 
-**¿Cómo obtenerla?**
-1. Ve a [Hugging Face](https://huggingface.co/)
-2. Crea una cuenta gratuita
-3. Ve a Settings → Access Tokens
-4. Crea un nuevo token con permisos de lectura
-5. Copia el token generado
+El nodo ahora usa **Python nativo** en n8n con sentence-transformers local:
+- ✅ Sin dependencias de APIs externas
+- ✅ Más rápido y confiable
+- ✅ Sin límites de rate limiting
+- ✅ Procesamiento completamente local
 
 ### 2. 🌲 Pinecone Configuration
 ```
@@ -57,15 +54,16 @@ GOOGLE_API_KEY=tu_google_gemini_api_key_aqui
 
 ## 🔄 Cambios Realizados
 
-### ❌ Problema Anterior:
-- Usaba `child_process` para ejecutar Python localmente
-- Este módulo está bloqueado en n8n por seguridad
+### ❌ Problemas Anteriores:
+1. **v1:** Usaba `child_process` para ejecutar Python (bloqueado por seguridad)
+2. **v2:** Usaba Hugging Face API (dependencia externa, rate limits)
 
-### ✅ Solución Implementada:
-- Cambiado a **Hugging Face API** para generar embeddings
+### ✅ Solución Final Implementada:
+- Cambiado a **Python nativo** en n8n con sentence-transformers
 - Usa el mismo modelo: `sentence-transformers/all-MiniLM-L6-v2`
-- Compatible con las restricciones de seguridad de n8n
+- Procesamiento 100% local sin APIs externas
 - Mantiene la misma calidad y dimensiones (384) de embeddings
+- Compatible con los vectores ya almacenados en Pinecone
 
 ## 🧪 Probar el Sistema
 
@@ -85,16 +83,16 @@ GOOGLE_API_KEY=tu_google_gemini_api_key_aqui
 
 ## ⚠️ Notas Importantes
 
-- **Hugging Face API:** Tiene límites gratuitos, pero es suficiente para pruebas
+- **Python Local:** Sin límites de API, procesamiento completamente local
 - **Compatibilidad:** Los embeddings generados son compatibles con los ya almacenados en Pinecone
 - **Backup:** Guarda siempre una copia del workflow antes de hacer cambios
 
 ## 🆘 Troubleshooting
 
-### Si hay errores de API:
-1. Verifica que todas las API keys están correctas
-2. Comprueba que no hay caracteres extra o espacios
-3. Asegúrate de que las APIs están activas
+### Si hay errores de Python:
+1. Verifica que n8n tiene sentence-transformers instalado
+2. Comprueba que el nodo está configurado en modo Python
+3. Asegúrate de que el modelo se puede descargar (primera ejecución)
 
 ### Si no encuentra contexto:
 1. Verifica que el índice de Pinecone tiene los 949 vectores

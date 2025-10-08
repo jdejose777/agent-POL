@@ -19,7 +19,8 @@
       },
       {
         "parameters": {
-          "jsCode": "// 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n// Este nodo toma la pregunta del usuario y genera su embedding usando Hugging Face API\n\n// Obtener la pregunta del webhook\nconst pregunta = $input.first().json.body.pregunta;\n\nif (!pregunta) {\n  throw new Error('❌ No se recibió una pregunta válida');\n}\n\nconsole.log('📝 Pregunta recibida:', pregunta);\n\n// Configuración de Hugging Face\nconst huggingFaceApiKey = $env.HUGGINGFACE_API_KEY;\nif (!huggingFaceApiKey) {\n  throw new Error('❌ HUGGINGFACE_API_KEY no está configurada');\n}\n\n// Función para generar embedding usando Hugging Face API\nasync function generarEmbedding(texto) {\n  try {\n    const response = await $http.request({\n      method: 'POST',\n      url: 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2',\n      headers: {\n        'Authorization': `Bearer ${huggingFaceApiKey}`,\n        'Content-Type': 'application/json'\n      },\n      body: {\n        inputs: texto,\n        options: {\n          wait_for_model: true\n        }\n      }\n    });\n    \n    if (response.status !== 200) {\n      throw new Error(`❌ Error en Hugging Face API: ${response.status} - ${response.statusText}`);\n    }\n    \n    // La API de Hugging Face devuelve el embedding directamente\n    const embedding = response.data;\n    \n    if (!Array.isArray(embedding) || embedding.length === 0) {\n      throw new Error('❌ Respuesta inválida de Hugging Face API');\n    }\n    \n    return embedding;\n    \n  } catch (error) {\n    throw new Error(`❌ Error generando embedding: ${error.message}`);\n  }\n}\n\n// Generar el embedding\nconst embedding = await generarEmbedding(pregunta);\n\nconsole.log('✅ Embedding generado correctamente con Hugging Face API');\nconsole.log('📊 Dimensiones del embedding:', embedding.length);\n\n// Devolver los datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  embedding: embedding,\n  timestamp: new Date().toISOString()\n};"
+          "mode": "runOnceForAllItems",
+          "pythonCode": "# 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n# Este nodo toma la pregunta del usuario y genera su embedding usando sentence-transformers local\n\nfrom sentence_transformers import SentenceTransformer\nimport numpy as np\nfrom datetime import datetime\n\n# Obtener la pregunta del webhook desde el item anterior\npregunta = items[0].json[\"body\"][\"pregunta\"]\n\n# Validar que se recibió una pregunta\nif not pregunta:\n    raise ValueError(\"❌ No se recibió una pregunta válida\")\n\nprint(f\"📝 Pregunta recibida: {pregunta}\")\n\n# Cargar el modelo sentence-transformers\n# Usando el mismo modelo que se usó para generar los embeddings en Pinecone\nprint(\"🤖 Cargando modelo all-MiniLM-L6-v2...\")\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\n# Generar el embedding de la pregunta\nprint(\"🔄 Generando embedding...\")\nembedding_array = model.encode([pregunta])[0]\n\n# Convertir numpy array a lista para compatibilidad JSON\nembedding_list = embedding_array.tolist()\n\nprint(f\"✅ Embedding generado correctamente\")\nprint(f\"📊 Dimensiones del embedding: {len(embedding_list)}\")\nprint(f\"🎯 Tipo de datos: {type(embedding_list)}\")\n\n# Devolver los datos para el siguiente nodo en formato n8n\n# El formato debe ser una lista de diccionarios con la clave 'json'\nreturn [\n    {\n        \"json\": {\n            \"pregunta\": pregunta,\n            \"embedding\": embedding_list,\n            \"timestamp\": datetime.now().isoformat(),\n            \"dimensiones\": len(embedding_list),\n            \"modelo\": \"all-MiniLM-L6-v2\"\n        }\n    }\n]"
         },
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
@@ -28,8 +29,8 @@
           300
         ],
         "id": "embed-generator-node",
-        "name": "🧠 Generar Embedding HF",
-        "notes": "Convierte la pregunta del usuario en embedding usando Hugging Face API"
+        "name": "🧠 Generar Embedding Python",
+        "notes": "Convierte la pregunta del usuario en embedding usando sentence-transformers local"
       },
       {
         "parameters": {
@@ -98,14 +99,14 @@
         "main": [
           [
             {
-              "node": "🧠 Generar Embedding HF",
+              "node": "🧠 Generar Embedding Python",
               "type": "main",
               "index": 0
             }
           ]
         ]
       },
-      "🧠 Generar Embedding HF": {
+      "🧠 Generar Embedding Python": {
         "main": [
           [
             {
