@@ -48,17 +48,64 @@
       },
       {
         "parameters": {
-          "jsCode": "// 🤖 NODO 4: GENERAR RESPUESTA CON GOOGLE GEMINI\n// Este nodo construye el prompt final y genera la respuesta usando Gemini\n\n// Obtener datos del nodo anterior\nconst { pregunta, contexto, tieneContexto, numeroResultados } = $input.first().json;\n\nconsole.log('🤖 Generando respuesta para:', pregunta);\nconsole.log('📚 Contexto disponible:', tieneContexto);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada');\n}\n\n// Construir el prompt según si hay contexto o no\nlet promptFinal;\n\nif (tieneContexto) {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado.\n\nCONTEXTO DEL CÓDIGO PENAL:\n${contexto}\n\nPREGUNTA:\n${pregunta}\n\nINSTRUCCIONES:\n- Responde basándote únicamente en el contexto del Código Penal proporcionado\n- Si la información no está en el contexto, indícalo claramente\n- Cita los artículos específicos cuando sea posible\n- Usa un lenguaje claro y profesional\n- Si es relevante, menciona las penas asociadas\n\nRESPUESTA:`;\n} else {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español.\n\nPREGUNTA:\n${pregunta}\n\nNo se encontró información específica en el Código Penal para responder a esta pregunta.\n\nResponde educadamente explicando que:\n1. No se encontró información relevante en el Código Penal procesado\n2. Sugiere reformular la pregunta usando términos jurídicos más específicos\n3. Recuerda que solo puedes consultar sobre el Código Penal español\n\nRESPUESTA:`;\n}\n\n// Función para llamar a Google Gemini\nasync function generarRespuestaGemini(prompt) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      contents: [{\n        parts: [{\n          text: prompt\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.3,\n        topK: 20,\n        topP: 0.8,\n        maxOutputTokens: 800\n      }\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.candidates[0].content.parts[0].text.trim();\n}\n\n// Generar la respuesta\nconst respuestaFinal = await generarRespuestaGemini(promptFinal);\n\nconsole.log('✅ Respuesta generada correctamente con Google Gemini');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: pregunta,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'gemini-1.5-flash',\n    dominio: 'codigo-penal-espanol'\n  }\n};\n\nreturn respuestaCompleta;"
+          "method": "POST",
+          "url": "URL_DE_LA_API_AQUI",
+          "authentication": "headerAuth",
+          "headerAuth": {
+            "name": "Authorization",
+            "value": "Bearer {{ $credentials.miApiKeySecreta }}"
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "model",
+                "value": "llama3-8b-8192"
+              },
+              {
+                "name": "messages",
+                "value": "=[{\n  \"role\": \"user\",\n  \"content\": \"Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado del Código Penal.\\n\\n{{ $json.tieneContexto ? 'CONTEXTO DEL CÓDIGO PENAL:\\n' + $json.contexto + '\\n\\n' : 'No se encontró información específica en el Código Penal para esta consulta.\\n\\n' }}PREGUNTA:\\n{{ $json.pregunta }}\\n\\nINSTRUCCIONES:\\n- Responde basándote únicamente en el contexto del Código Penal proporcionado\\n- Si la información no está en el contexto, indícalo claramente\\n- Cita los artículos específicos cuando sea posible\\n- Usa un lenguaje claro y profesional\\n- Si es relevante, menciona las penas asociadas\\n\\nRESPUESTA:\"\n}]"
+              },
+              {
+                "name": "temperature",
+                "value": "0.3"
+              }
+            ]
+          },
+          "options": {
+            "response": {
+              "response": {
+                "neverError": false,
+                "responseFormat": "autodetect",
+                "outputPropertyName": "data"
+              }
+            }
+          }
         },
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
         "position": [
           720,
           300
         ],
-        "id": "openai-response-node",
-        "name": "⚖️ Asistente Jurídico Gemini",
-        "notes": "Genera respuesta especializada en Código Penal usando Google Gemini"
+        "id": "llm-response-node",
+        "name": "🤖 LLM Open Source",
+        "notes": "Genera respuesta especializada usando LLM de código abierto (Groq/HuggingFace/Ollama)"
+      },
+      {
+        "parameters": {
+          "jsCode": "// 🔧 NODO 5: PROCESAR RESPUESTA DEL LLM\n// Este nodo extrae la respuesta del LLM y la formatea para el frontend\n\n// Obtener datos del nodo anterior\nconst llmResponse = $input.first().json;\nconst preguntaOriginal = $input.first().json.pregunta || 'Pregunta no disponible';\nconst tieneContexto = $input.first().json.tieneContexto || false;\nconst numeroResultados = $input.first().json.numeroResultados || 0;\n\nconsole.log('🔧 Procesando respuesta del LLM...');\nconsole.log('📊 Datos recibidos:', Object.keys(llmResponse));\n\n// Extraer la respuesta del LLM según el formato de respuesta\nlet respuestaFinal = '';\n\n// Intentar extraer la respuesta de diferentes formatos de API\nif (llmResponse.choices && llmResponse.choices[0]) {\n  // Formato OpenAI/Groq\n  respuestaFinal = llmResponse.choices[0].message?.content || llmResponse.choices[0].text || '';\n} else if (llmResponse.generated_text) {\n  // Formato Hugging Face\n  respuestaFinal = llmResponse.generated_text;\n} else if (llmResponse.response) {\n  // Formato Ollama\n  respuestaFinal = llmResponse.response;\n} else if (llmResponse.message) {\n  // Formato genérico\n  respuestaFinal = llmResponse.message.content || llmResponse.message;\n} else if (typeof llmResponse.data === 'string') {\n  // Respuesta directa como string\n  respuestaFinal = llmResponse.data;\n} else if (llmResponse.content) {\n  // Formato directo\n  respuestaFinal = llmResponse.content;\n} else {\n  // Fallback: intentar encontrar cualquier campo que contenga texto\n  const possibleFields = ['text', 'output', 'result', 'answer'];\n  for (const field of possibleFields) {\n    if (llmResponse[field] && typeof llmResponse[field] === 'string') {\n      respuestaFinal = llmResponse[field];\n      break;\n    }\n  }\n}\n\n// Si no se encontró respuesta, usar toda la respuesta como string\nif (!respuestaFinal && typeof llmResponse === 'string') {\n  respuestaFinal = llmResponse;\n} else if (!respuestaFinal) {\n  respuestaFinal = 'Lo siento, no pude procesar la respuesta del modelo de lenguaje.';\n}\n\n// Limpiar la respuesta\nrespuestaFinal = respuestaFinal.trim();\n\nconsole.log('✅ Respuesta procesada correctamente');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: preguntaOriginal,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'llm-open-source',\n    dominio: 'codigo-penal-espanol'\n  }\n};\n\nreturn respuestaCompleta;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          880,
+          300
+        ],
+        "id": "process-llm-response-node",
+        "name": "🔧 Procesar Respuesta LLM",
+        "notes": "Extrae y formatea la respuesta del LLM para el frontend"
       },
       {
         "parameters": {
@@ -86,7 +133,7 @@
         "type": "n8n-nodes-base.respondToWebhook",
         "typeVersion": 1.4,
         "position": [
-          960,
+          1040,
           300
         ],
         "id": "c6b648a2-d9c0-4860-80cd-5e623175a027",
@@ -121,14 +168,25 @@
         "main": [
           [
             {
-              "node": "⚖️ Asistente Jurídico Gemini",
+              "node": "🤖 LLM Open Source",
               "type": "main",
               "index": 0
             }
           ]
         ]
       },
-      "⚖️ Asistente Jurídico Gemini": {
+      "🤖 LLM Open Source": {
+        "main": [
+          [
+            {
+              "node": "🔧 Procesar Respuesta LLM",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔧 Procesar Respuesta LLM": {
         "main": [
           [
             {
