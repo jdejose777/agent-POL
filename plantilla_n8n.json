@@ -1,149 +1,149 @@
-{
-  "nodes": [
-    {
-      "parameters": {
-        "path": "rag-chat-agent",
-        "options": {
-          "noResponseBody": false
-        }
-      },
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2.1,
-      "position": [
-        0,
-        300
-      ],
-      "id": "ca7cf43e-2a8a-47de-91e6-eebcfde53362",
-      "name": "🎯 Webhook - Entrada del Chat",
-      "notes": "Punto de entrada para las preguntas del usuario desde el frontend"
-    },
-    {
-      "parameters": {
-        "jsCode": "// 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n// Este nodo toma la pregunta del usuario y genera su embedding usando sentence-transformers local\n\n// Obtener la pregunta del webhook\nconst pregunta = $input.first().json.body.pregunta;\n\nif (!pregunta) {\n  throw new Error('❌ No se recibió una pregunta válida');\n}\n\nconsole.log('📝 Pregunta recibida:', pregunta);\n\n// Función para generar embedding usando sentence-transformers con Python subprocess\nasync function generarEmbedding(texto) {\n  // Script Python para generar embedding\n  const pythonScript = `\nimport sys\nimport json\nfrom sentence_transformers import SentenceTransformer\n\n# Cargar modelo\nmodel = SentenceTransformer('all-MiniLM-L6-v2')\n\n# Obtener texto del argumento\ntexto = sys.argv[1]\n\n# Generar embedding\nembedding = model.encode([texto])[0].tolist()\n\n# Devolver como JSON\nprint(json.dumps(embedding))\n`;\n  \n  // Ejecutar Python script\n  const { execSync } = require('child_process');\n  \n  try {\n    // Crear archivo temporal con el script\n    const fs = require('fs');\n    const path = require('path');\n    const tempScript = path.join('/tmp', 'embedding_script.py');\n    \n    fs.writeFileSync(tempScript, pythonScript);\n    \n    // Ejecutar el script\n    const result = execSync(`python ${tempScript} \"${texto.replace(/\"/g, '\\\\\"')}\"`, {\n      encoding: 'utf8',\n      timeout: 30000\n    });\n    \n    // Limpiar archivo temporal\n    fs.unlinkSync(tempScript);\n    \n    // Parsear resultado\n    const embedding = JSON.parse(result.trim());\n    \n    return embedding;\n    \n  } catch (error) {\n    throw new Error(`❌ Error generando embedding: ${error.message}`);\n  }\n}\n\n// Generar el embedding\nconst embedding = await generarEmbedding(pregunta);\n\nconsole.log('✅ Embedding generado correctamente con sentence-transformers');\nconsole.log('📊 Dimensiones del embedding:', embedding.length);\n\n// Devolver los datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  embedding: embedding,\n  timestamp: new Date().toISOString()\n};"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        240,
-        300
-      ],
-      "id": "embed-generator-node",
-      "name": "🧠 Generar Embedding Local",
-      "notes": "Convierte la pregunta del usuario en embedding usando sentence-transformers"
-    },
-    {
-      "parameters": {
-        "jsCode": "// 🔍 NODO 3: BÚSQUEDA EN PINECONE\n// Este nodo busca contenido relevante en la base de datos vectorial usando el embedding\n\n// Obtener datos del nodo anterior\nconst { pregunta, embedding } = $input.first().json;\n\nconsole.log('🔍 Iniciando búsqueda en Pinecone para:', pregunta);\n\n// Configuración de Pinecone\nconst pineconeApiKey = $env.PINECONE_API_KEY;\nconst pineconeEnvironment = $env.PINECONE_ENVIRONMENT;\nconst pineconeIndexName = $env.PINECONE_INDEX_NAME;\n\nif (!pineconeApiKey || !pineconeEnvironment || !pineconeIndexName) {\n  throw new Error('❌ Variables de Pinecone no configuradas: PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME');\n}\n\n// Construir URL de Pinecone\nconst pineconeUrl = `https://${pineconeIndexName}-${pineconeEnvironment}.svc.pinecone.io/query`;\n\n// Función para buscar en Pinecone\nasync function buscarEnPinecone(queryEmbedding, topK = 5) {\n  const response = await $http.request({\n    method: 'POST',\n    url: pineconeUrl,\n    headers: {\n      'Api-Key': pineconeApiKey,\n      'Content-Type': 'application/json'\n    },\n    body: {\n      vector: queryEmbedding,\n      topK: topK,\n      includeMetadata: true,\n      includeValues: false\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Pinecone API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data;\n}\n\n// Realizar búsqueda\nconst resultadosBusqueda = await buscarEnPinecone(embedding, 5);\n\n// Extraer contexto relevante\nconst matches = resultadosBusqueda.matches || [];\nconst contexto = matches\n  .filter(match => match.score > 0.7) // Solo matches con alta similitud\n  .map(match => match.metadata?.text || '')\n  .filter(text => text.length > 0)\n  .join('\\n\\n');\n\nconsole.log('📋 Contexto encontrado:');\nconsole.log(`   - Matches encontrados: ${matches.length}`);\nconsole.log(`   - Matches relevantes: ${matches.filter(m => m.score > 0.7).length}`);\nconsole.log(`   - Longitud del contexto: ${contexto.length} caracteres`);\n\nif (contexto.length === 0) {\n  console.log('⚠️  No se encontró contexto relevante');\n}\n\n// Devolver datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  contexto: contexto,\n  matches: matches,\n  numeroResultados: matches.length,\n  tieneContexto: contexto.length > 0\n};"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        480,
-        300
-      ],
-      "id": "pinecone-search-node",
-      "name": "🔍 Búsqueda en Pinecone",
-      "notes": "Busca información relevante en la base de datos vectorial"
-    },
-    {
-      "parameters": {
-        "jsCode": "// 🤖 NODO 4: GENERAR RESPUESTA CON GOOGLE GEMINI\n// Este nodo construye el prompt final y genera la respuesta usando Gemini\n\n// Obtener datos del nodo anterior\nconst { pregunta, contexto, tieneContexto, numeroResultados } = $input.first().json;\n\nconsole.log('🤖 Generando respuesta para:', pregunta);\nconsole.log('📚 Contexto disponible:', tieneContexto);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada');\n}\n\n// Construir el prompt según si hay contexto o no\nlet promptFinal;\n\nif (tieneContexto) {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado.\n\nCONTEXTO DEL CÓDIGO PENAL:\n${contexto}\n\nPREGUNTA:\n${pregunta}\n\nINSTRUCCIONES:\n- Responde basándote únicamente en el contexto del Código Penal proporcionado\n- Si la información no está en el contexto, indícalo claramente\n- Cita los artículos específicos cuando sea posible\n- Usa un lenguaje claro y profesional\n- Si es relevante, menciona las penas asociadas\n\nRESPUESTA:`;\n} else {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español.\n\nPREGUNTA:\n${pregunta}\n\nNo se encontró información específica en el Código Penal para responder a esta pregunta.\n\nResponde educadamente explicando que:\n1. No se encontró información relevante en el Código Penal procesado\n2. Sugiere reformular la pregunta usando términos jurídicos más específicos\n3. Recuerda que solo puedes consultar sobre el Código Penal español\n\nRESPUESTA:`;\n}\n\n// Función para llamar a Google Gemini\nasync function generarRespuestaGemini(prompt) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      contents: [{\n        parts: [{\n          text: prompt\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.3,\n        topK: 20,\n        topP: 0.8,\n        maxOutputTokens: 800\n      }\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.candidates[0].content.parts[0].text.trim();\n}\n\n// Generar la respuesta\nconst respuestaFinal = await generarRespuestaGemini(promptFinal);\n\nconsole.log('✅ Respuesta generada correctamente con Google Gemini');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: pregunta,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'gemini-1.5-flash',\n    dominio: 'codigo-penal-espanol'\n  }\n};\n\nreturn respuestaCompleta;"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        720,
-        300
-      ],
-      "id": "openai-response-node",
-      "name": "⚖️ Asistente Jurídico Gemini",
-      "notes": "Genera respuesta especializada en Código Penal usando Google Gemini"
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ $json }}",
-        "options": {
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "*"
-              },
-              {
-                "name": "Access-Control-Allow-Headers",
-                "value": "Content-Type"
-              }
-            ]
+  {
+    "nodes": [
+      {
+        "parameters": {
+          "path": "rag-chat-agent",
+          "options": {
+            "noResponseBody": false
           }
-        }
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          300
+        ],
+        "id": "ca7cf43e-2a8a-47de-91e6-eebcfde53362",
+        "name": "🎯 Webhook - Entrada del Chat",
+        "notes": "Punto de entrada para las preguntas del usuario desde el frontend"
       },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.4,
-      "position": [
-        960,
-        300
-      ],
-      "id": "c6b648a2-d9c0-4860-80cd-5e623175a027",
-      "name": "📤 Responder al Chat",
-      "notes": "Devuelve la respuesta final al frontend con headers CORS"
+      {
+        "parameters": {
+          "jsCode": "// 🔧 NODO 2: GENERAR EMBEDDING DE LA PREGUNTA\n// Este nodo toma la pregunta del usuario y genera su embedding usando Hugging Face API\n\n// Obtener la pregunta del webhook\nconst pregunta = $input.first().json.body.pregunta;\n\nif (!pregunta) {\n  throw new Error('❌ No se recibió una pregunta válida');\n}\n\nconsole.log('📝 Pregunta recibida:', pregunta);\n\n// Configuración de Hugging Face\nconst huggingFaceApiKey = $env.HUGGINGFACE_API_KEY;\nif (!huggingFaceApiKey) {\n  throw new Error('❌ HUGGINGFACE_API_KEY no está configurada');\n}\n\n// Función para generar embedding usando Hugging Face API\nasync function generarEmbedding(texto) {\n  try {\n    const response = await $http.request({\n      method: 'POST',\n      url: 'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2',\n      headers: {\n        'Authorization': `Bearer ${huggingFaceApiKey}`,\n        'Content-Type': 'application/json'\n      },\n      body: {\n        inputs: texto,\n        options: {\n          wait_for_model: true\n        }\n      }\n    });\n    \n    if (response.status !== 200) {\n      throw new Error(`❌ Error en Hugging Face API: ${response.status} - ${response.statusText}`);\n    }\n    \n    // La API de Hugging Face devuelve el embedding directamente\n    const embedding = response.data;\n    \n    if (!Array.isArray(embedding) || embedding.length === 0) {\n      throw new Error('❌ Respuesta inválida de Hugging Face API');\n    }\n    \n    return embedding;\n    \n  } catch (error) {\n    throw new Error(`❌ Error generando embedding: ${error.message}`);\n  }\n}\n\n// Generar el embedding\nconst embedding = await generarEmbedding(pregunta);\n\nconsole.log('✅ Embedding generado correctamente con Hugging Face API');\nconsole.log('📊 Dimensiones del embedding:', embedding.length);\n\n// Devolver los datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  embedding: embedding,\n  timestamp: new Date().toISOString()\n};"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          240,
+          300
+        ],
+        "id": "embed-generator-node",
+        "name": "🧠 Generar Embedding HF",
+        "notes": "Convierte la pregunta del usuario en embedding usando Hugging Face API"
+      },
+      {
+        "parameters": {
+          "jsCode": "// 🔍 NODO 3: BÚSQUEDA EN PINECONE\n// Este nodo busca contenido relevante en la base de datos vectorial usando el embedding\n\n// Obtener datos del nodo anterior\nconst { pregunta, embedding } = $input.first().json;\n\nconsole.log('🔍 Iniciando búsqueda en Pinecone para:', pregunta);\n\n// Configuración de Pinecone\nconst pineconeApiKey = $env.PINECONE_API_KEY;\nconst pineconeEnvironment = $env.PINECONE_ENVIRONMENT;\nconst pineconeIndexName = $env.PINECONE_INDEX_NAME;\n\nif (!pineconeApiKey || !pineconeEnvironment || !pineconeIndexName) {\n  throw new Error('❌ Variables de Pinecone no configuradas: PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME');\n}\n\n// Construir URL de Pinecone\nconst pineconeUrl = `https://${pineconeIndexName}-${pineconeEnvironment}.svc.pinecone.io/query`;\n\n// Función para buscar en Pinecone\nasync function buscarEnPinecone(queryEmbedding, topK = 5) {\n  const response = await $http.request({\n    method: 'POST',\n    url: pineconeUrl,\n    headers: {\n      'Api-Key': pineconeApiKey,\n      'Content-Type': 'application/json'\n    },\n    body: {\n      vector: queryEmbedding,\n      topK: topK,\n      includeMetadata: true,\n      includeValues: false\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Pinecone API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data;\n}\n\n// Realizar búsqueda\nconst resultadosBusqueda = await buscarEnPinecone(embedding, 5);\n\n// Extraer contexto relevante\nconst matches = resultadosBusqueda.matches || [];\nconst contexto = matches\n  .filter(match => match.score > 0.7) // Solo matches con alta similitud\n  .map(match => match.metadata?.text || '')\n  .filter(text => text.length > 0)\n  .join('\\n\\n');\n\nconsole.log('📋 Contexto encontrado:');\nconsole.log(`   - Matches encontrados: ${matches.length}`);\nconsole.log(`   - Matches relevantes: ${matches.filter(m => m.score > 0.7).length}`);\nconsole.log(`   - Longitud del contexto: ${contexto.length} caracteres`);\n\nif (contexto.length === 0) {\n  console.log('⚠️  No se encontró contexto relevante');\n}\n\n// Devolver datos para el siguiente nodo\nreturn {\n  pregunta: pregunta,\n  contexto: contexto,\n  matches: matches,\n  numeroResultados: matches.length,\n  tieneContexto: contexto.length > 0\n};"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          300
+        ],
+        "id": "pinecone-search-node",
+        "name": "🔍 Búsqueda en Pinecone",
+        "notes": "Busca información relevante en la base de datos vectorial"
+      },
+      {
+        "parameters": {
+          "jsCode": "// 🤖 NODO 4: GENERAR RESPUESTA CON GOOGLE GEMINI\n// Este nodo construye el prompt final y genera la respuesta usando Gemini\n\n// Obtener datos del nodo anterior\nconst { pregunta, contexto, tieneContexto, numeroResultados } = $input.first().json;\n\nconsole.log('🤖 Generando respuesta para:', pregunta);\nconsole.log('📚 Contexto disponible:', tieneContexto);\n\n// Configuración de Google Gemini\nconst googleApiKey = $env.GOOGLE_API_KEY;\nif (!googleApiKey) {\n  throw new Error('❌ GOOGLE_API_KEY no está configurada');\n}\n\n// Construir el prompt según si hay contexto o no\nlet promptFinal;\n\nif (tieneContexto) {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado.\n\nCONTEXTO DEL CÓDIGO PENAL:\n${contexto}\n\nPREGUNTA:\n${pregunta}\n\nINSTRUCCIONES:\n- Responde basándote únicamente en el contexto del Código Penal proporcionado\n- Si la información no está en el contexto, indícalo claramente\n- Cita los artículos específicos cuando sea posible\n- Usa un lenguaje claro y profesional\n- Si es relevante, menciona las penas asociadas\n\nRESPUESTA:`;\n} else {\n  promptFinal = `Eres un asistente jurídico especializado en el Código Penal español.\n\nPREGUNTA:\n${pregunta}\n\nNo se encontró información específica en el Código Penal para responder a esta pregunta.\n\nResponde educadamente explicando que:\n1. No se encontró información relevante en el Código Penal procesado\n2. Sugiere reformular la pregunta usando términos jurídicos más específicos\n3. Recuerda que solo puedes consultar sobre el Código Penal español\n\nRESPUESTA:`;\n}\n\n// Función para llamar a Google Gemini\nasync function generarRespuestaGemini(prompt) {\n  const response = await $http.request({\n    method: 'POST',\n    url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleApiKey}`,\n    headers: {\n      'Content-Type': 'application/json'\n    },\n    body: {\n      contents: [{\n        parts: [{\n          text: prompt\n        }]\n      }],\n      generationConfig: {\n        temperature: 0.3,\n        topK: 20,\n        topP: 0.8,\n        maxOutputTokens: 800\n      }\n    }\n  });\n  \n  if (response.status !== 200) {\n    throw new Error(`❌ Error en Google Gemini API: ${response.status} - ${response.statusText}`);\n  }\n  \n  return response.data.candidates[0].content.parts[0].text.trim();\n}\n\n// Generar la respuesta\nconst respuestaFinal = await generarRespuestaGemini(promptFinal);\n\nconsole.log('✅ Respuesta generada correctamente con Google Gemini');\nconsole.log('📝 Longitud de la respuesta:', respuestaFinal.length, 'caracteres');\n\n// Preparar respuesta final para el webhook\nconst respuestaCompleta = {\n  respuesta: respuestaFinal,\n  metadata: {\n    pregunta: pregunta,\n    tieneContexto: tieneContexto,\n    numeroResultados: numeroResultados,\n    timestamp: new Date().toISOString(),\n    modelo: 'gemini-1.5-flash',\n    dominio: 'codigo-penal-espanol'\n  }\n};\n\nreturn respuestaCompleta;"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          720,
+          300
+        ],
+        "id": "openai-response-node",
+        "name": "⚖️ Asistente Jurídico Gemini",
+        "notes": "Genera respuesta especializada en Código Penal usando Google Gemini"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ $json }}",
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                },
+                {
+                  "name": "Access-Control-Allow-Headers",
+                  "value": "Content-Type"
+                }
+              ]
+            }
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          960,
+          300
+        ],
+        "id": "c6b648a2-d9c0-4860-80cd-5e623175a027",
+        "name": "📤 Responder al Chat",
+        "notes": "Devuelve la respuesta final al frontend con headers CORS"
+      }
+    ],
+    "connections": {
+      "🎯 Webhook - Entrada del Chat": {
+        "main": [
+          [
+            {
+              "node": "🧠 Generar Embedding HF",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🧠 Generar Embedding HF": {
+        "main": [
+          [
+            {
+              "node": "🔍 Búsqueda en Pinecone",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "🔍 Búsqueda en Pinecone": {
+        "main": [
+          [
+            {
+              "node": "⚖️ Asistente Jurídico Gemini",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "⚖️ Asistente Jurídico Gemini": {
+        "main": [
+          [
+            {
+              "node": "📤 Responder al Chat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {},
+    "meta": {
+      "templateCreationSource": "n8n_agent_rag_chat",
+      "instanceId": "8445ee8fb1232b8fb10ebac704619d5ec8c5d77a6bf0cb1d173277b89a3cde54",
+      "description": "⚖️ Asistente jurídico especializado en Código Penal español. Usa embeddings locales y genera respuestas contextuales con Gemini.",
+      "name": "Agent POL - Asistente Jurídico"
     }
-  ],
-  "connections": {
-    "🎯 Webhook - Entrada del Chat": {
-      "main": [
-        [
-          {
-            "node": "🧠 Generar Embedding Local",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "🧠 Generar Embedding Local": {
-      "main": [
-        [
-          {
-            "node": "🔍 Búsqueda en Pinecone",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "🔍 Búsqueda en Pinecone": {
-      "main": [
-        [
-          {
-            "node": "⚖️ Asistente Jurídico Gemini",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "⚖️ Asistente Jurídico Gemini": {
-      "main": [
-        [
-          {
-            "node": "📤 Responder al Chat",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "pinData": {},
-  "meta": {
-    "templateCreationSource": "n8n_agent_rag_chat",
-    "instanceId": "8445ee8fb1232b8fb10ebac704619d5ec8c5d77a6bf0cb1d173277b89a3cde54",
-    "description": "⚖️ Asistente jurídico especializado en Código Penal español. Usa embeddings locales y genera respuestas contextuales con Gemini.",
-    "name": "Agent POL - Asistente Jurídico"
   }
-}
