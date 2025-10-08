@@ -10,8 +10,8 @@ pdfplumber>=0.10.0
 langchain>=0.1.0
 langchain-text-splitters>=0.0.1
 
-# Generación de embeddings con OpenAI
-openai>=1.0.0
+# Generación de embeddings con Google Gemini
+google-generativeai>=0.3.0
 
 # Base de datos vectorial Pinecone
 pinecone>=7.0.0
