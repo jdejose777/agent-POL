@@ -1,8 +1,36 @@
 # 🔧 Configuración de n8n para el Sistema RAG
 
-## 📋 Variables de Entorno Requeridas
+## 📋 Variables Requeridas
 
-Para que el workflow funcione correctamente, necesitas configurar las siguientes variables de entorno en tu instancia de n8n:
+Para que el workflow funcione correctamente, necesitas configurar las siguientes variables:
+
+### 🔧 Método 1: Variables del Workflow (Recomendado)
+
+En n8n, ve a: **Workflow Settings → Variables** y añade:
+
+```
+PINECONE_API_KEY = tu_pinecone_api_key
+PINECONE_ENVIRONMENT = tu_environment (ej: gcp-starter)
+PINECONE_INDEX_NAME = developer-quickstart-py
+```
+
+**Ventajas:**
+- ✅ No requiere acceso al servidor
+- ✅ Configuración desde la UI de n8n
+- ✅ Específico por workflow
+- ✅ Compatible con n8n Cloud
+
+### 🔧 Método 2: Variables de Entorno (Alternativo)
+
+Si tienes acceso al servidor, puedes configurar variables de entorno:
+
+```bash
+export PINECONE_API_KEY=tu_api_key
+export PINECONE_ENVIRONMENT=tu_environment
+export PINECONE_INDEX_NAME=developer-quickstart-py
+```
+
+**Nota:** El código usa `$vars` (Workflow Variables) por defecto para mayor seguridad.
 
 ### 1. 🐍 Python Environment
 **Ya no necesitas API Key externa!**
@@ -14,25 +42,35 @@ El nodo ahora usa **Python nativo** en n8n con sentence-transformers local:
 - ✅ Procesamiento completamente local
 
 ### 2. 🌲 Pinecone Configuration
+
+**Configuración en Workflow Variables:**
+
+En n8n: Workflow Settings → Variables → Añadir:
 ```
-PINECONE_API_KEY=tu_pinecone_api_key_aqui
-PINECONE_ENVIRONMENT=tu_pinecone_environment
-PINECONE_INDEX_NAME=developer-quickstart-py
+PINECONE_API_KEY = tu_pinecone_api_key
+PINECONE_ENVIRONMENT = tu_environment
+PINECONE_INDEX_NAME = developer-quickstart-py
 ```
 
 **Ya configurado previamente:**
-- Environment: Usa el mismo que configuraste antes
 - Index Name: `developer-quickstart-py` (donde están los 949 vectores del código penal)
+- Environment: El que te proporcionó Pinecone al crear el índice
 
-### 3. 🤖 Google Gemini API Key
+**Cómo obtener los valores:**
+1. Ve a [app.pinecone.io](https://app.pinecone.io/)
+2. Dashboard → Tu índice
+3. Pestaña "Connect" → Copia API Key
+4. El environment está en la URL del índice (después de `svc.`)
+
+### 3. 🤖 Google Gemini API Key (Opcional - si no usas LLM open source)
+
+Si decides usar Google Gemini en lugar de LLMs de código abierto:
+
 ```
-GOOGLE_API_KEY=tu_google_gemini_api_key_aqui
+GOOGLE_API_KEY = tu_google_gemini_api_key
 ```
 
-**Si no tienes una:**
-1. Ve a [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Crea una API key gratuita
-3. Copia la key generada
+**Nota:** El workflow actual está configurado para usar LLMs de código abierto (Groq, Hugging Face, Ollama). Ver `CONFIGURACION_LLMS.md` para más detalles.
 
 ## 🚀 Pasos para Implementar
 
