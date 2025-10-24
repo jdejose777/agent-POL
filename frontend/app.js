@@ -3,8 +3,8 @@
  * Este script maneja la interfaz de usuario para el chat con el sistema RAG
  */
 
-// URL del webhook de n8n (reemplaza con tu URL real)
-const WEBHOOK_URL = 'http://localhost:5678/webhook/rag-chat-agent';
+// URL de la nueva API FastAPI (reemplaza n8n)
+const WEBHOOK_URL = 'http://localhost:8000/chat';
 
 // Elementos del DOM - obtenemos referencias a los elementos principales
 const chatContainer = document.getElementById('chatContainer');
