@@ -1,6 +1,6 @@
 # main.py
 # Backend API para el sistema RAG de consultas legales
-# Reemplaza completamente el workflow de n8n
+# Versión con sentence-transformers LOCAL (sin API de Hugging Face)
 
 import os
 from fastapi import FastAPI, HTTPException
@@ -8,19 +8,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
 
 # Cargar las variables de entorno desde .env
 load_dotenv()
 
 # --- 1. CONFIGURACIÓN Y CLAVES SECRETAS ---
-HUGGING_FACE_TOKEN = os.getenv("HUGGING_FACE_TOKEN")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # URLs de APIs
 PINECONE_HOST = "https://developer-quickstart-py-3oyi1w3.svc.aped-4627-b74a.pinecone.io/query"
-HUGGING_FACE_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+# --- CARGAR MODELO DE EMBEDDINGS LOCAL ---
+print("🤖 Cargando modelo sentence-transformers...")
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+print("✅ Modelo cargado correctamente")
 
 
 # --- 2. MODELOS DE DATOS ---
@@ -60,35 +64,21 @@ async def handle_chat_request(request: ChatRequest):
     pregunta_usuario = request.pregunta
     print(f"📝 Recibida pregunta: {pregunta_usuario}")
 
-    # --- PASO 1: Obtener el Embedding desde Hugging Face ---
+    # --- PASO 1: Generar Embedding LOCAL con sentence-transformers ---
     try:
-        print("🤖 Llamando a Hugging Face para obtener embedding...")
-        hf_headers = {
-            "Authorization": f"Bearer {HUGGING_FACE_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        hf_payload = {
-            "inputs": pregunta_usuario,
-            "options": {"wait_for_model": True}
-        }
+        print("🤖 Generando embedding con sentence-transformers local...")
         
-        response_hf = requests.post(HUGGING_FACE_URL, headers=hf_headers, json=hf_payload, timeout=30)
-        response_hf.raise_for_status()
+        # Generar embedding usando el modelo local
+        embedding_array = embedding_model.encode([pregunta_usuario])[0]
         
-        embedding = response_hf.json()
-        
-        # Validar que sea un array válido
-        if not isinstance(embedding, list) or len(embedding) == 0:
-            raise ValueError("Embedding inválido recibido de Hugging Face")
+        # Convertir a lista de Python para JSON
+        embedding = embedding_array.tolist()
         
         print(f"✅ Embedding generado: {len(embedding)} dimensiones")
 
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error al contactar con Hugging Face: {e}")
+    except Exception as e:
+        print(f"❌ Error al generar embedding: {e}")
         raise HTTPException(status_code=500, detail=f"Error al generar el embedding: {str(e)}")
-    except ValueError as e:
-        print(f"❌ Error en formato de embedding: {e}")
-        raise HTTPException(status_code=500, detail=f"Error en formato de embedding: {str(e)}")
 
 
     # --- PASO 2: Buscar en Pinecone ---
