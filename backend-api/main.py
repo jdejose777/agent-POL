@@ -103,13 +103,20 @@ app.add_middleware(
 def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
     """
     Busca un artículo específico en el texto completo del PDF usando regex.
-    Evita confusiones entre art. X y art. X bis/ter/quater.
+    Soporta artículos simples (142) y con sufijos (142 bis, 127 ter, etc.)
     """
     import re
     
-    # Patrón mejorado: el PDF usa "Artículo N \n" (espacio + salto), no punto
-    # Busca "Artículo 142 " (con espacio) pero NO "Artículo 142 bis"
-    pattern = rf"(?i)(art[íi]culo\s+{numero_articulo})\s+(?!bis|ter|quater)(.+?)(?=\n\s*Art[íi]culo\s+\d+\s|\Z)"
+    # Normalizar el número de artículo (puede venir como "127 bis" o "127")
+    numero_articulo = numero_articulo.strip()
+    
+    # Si tiene bis/ter/quater, buscar exactamente ese artículo
+    if re.search(r'\b(bis|ter|quater)\b', numero_articulo, re.IGNORECASE):
+        # Buscar "Artículo 127 bis" específicamente
+        pattern = rf"(?i)(art[íi]culo\s+{re.escape(numero_articulo)})[\.\s]+(.+?)(?=\n\s*Art[íi]culo\s+\d+|\Z)"
+    else:
+        # Buscar "Artículo N" pero NO "Artículo N bis/ter/quater"
+        pattern = rf"(?i)(art[íi]culo\s+{numero_articulo})\s+(?!bis|ter|quater)(.+?)(?=\n\s*Art[íi]culo\s+\d+\s|\Z)"
     
     match = re.search(pattern, texto_completo, re.DOTALL | re.IGNORECASE)
     
@@ -168,8 +175,8 @@ def generate_rag_response(query: str):
 
         # --- PASO 1: DETECTAR NÚMERO DE ARTÍCULO ---
         import re
-        articulo_pattern = r'\b(?:art[íi]culo|art\.?)\s*(\d+)\b'
-        solo_numero_pattern = r'^\s*(\d+)\s*$'
+        articulo_pattern = r'\b(?:art[íi]culo|art\.?)\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\b'
+        solo_numero_pattern = r'^\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\s*$'
         
         numero_articulo = None
         match_articulo = re.search(articulo_pattern, query, re.IGNORECASE)
