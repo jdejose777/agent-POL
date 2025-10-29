@@ -124,10 +124,8 @@ def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
         # Incluir el encabezado completo "Artículo N"
         texto_articulo = match.group(0).strip()
         
-        # Limitar a 2000 caracteres
-        if len(texto_articulo) > 2000:
-            texto_articulo = texto_articulo[:2000] + "\n\n[...texto truncado...]"
-        
+        # NO truncar - devolver el artículo completo
+        # Si es muy largo, el flujo principal decidirá si pasarlo por Gemini
         return texto_articulo
     
     return None
@@ -204,8 +202,9 @@ def generate_rag_response(query: str):
                 print(f"✅ ¡Artículo {numero_articulo} encontrado con búsqueda exacta!")
                 texto_corregido = corregir_encoding(texto_exacto)
                 
-                # Responder directamente sin pasar por Gemini si es texto literal
-                if len(texto_corregido) < 2000:  # Si es razonablemente corto
+                # Responder directamente sin pasar por Gemini si es texto razonable
+                # Aumentado a 4000 caracteres (la mayoría de artículos caben)
+                if len(texto_corregido) < 4000:
                     respuesta_final = f"**Artículo {numero_articulo}**\n\n{texto_corregido}"
                     return {
                         "respuesta": respuesta_final,
@@ -218,7 +217,7 @@ def generate_rag_response(query: str):
                         }
                     }
                 else:
-                    # Si es muy largo, pasar por Gemini para formatear
+                    # Si es muy largo (>4000 chars), pasar por Gemini para formatear mejor
                     prompt = f"""Eres un asistente legal especializado en el Código Penal español.
 
 El usuario preguntó: "{query}"
@@ -230,8 +229,8 @@ Aquí está el texto LITERAL del artículo encontrado:
 Instrucciones:
 1. Responde con el texto COMPLETO del artículo tal como aparece
 2. NO resumas ni parafrasees - cita el texto literal
-3. Si el artículo es largo, preséntalo de forma organizada pero completa
-4. Usa formato Markdown para mejor legibilidad
+3. Organiza el contenido de forma clara usando formato Markdown
+4. Mantén TODOS los apartados, números y subapartados
 
 Responde ahora:"""
 
