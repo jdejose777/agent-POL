@@ -201,7 +201,7 @@ function addUserMessage(message) {
 
 /**
  * CREAR Y AÑADIR MENSAJE DEL BOT AL CHAT
- * Crea un elemento div para mostrar la respuesta del bot
+ * Crea un elemento div para mostrar la respuesta del bot con formato Markdown
  */
 function addBotMessage(message, type = 'normal') {
     console.log('🤖 Añadiendo mensaje del bot al chat');
@@ -210,11 +210,25 @@ function addBotMessage(message, type = 'normal') {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message bot-message${type !== 'normal' ? ` ${type}` : ''}`;
     
-    // Construir el HTML del mensaje con avatar y contenido
+    // Procesar el mensaje con Markdown si está disponible
+    let formattedMessage;
+    if (typeof marked !== 'undefined') {
+        // Configurar marked para mejor formato
+        marked.setOptions({
+            breaks: true,  // Respetar saltos de línea
+            gfm: true,     // GitHub Flavored Markdown
+        });
+        formattedMessage = marked.parse(message);
+    } else {
+        // Fallback si marked no está disponible
+        formattedMessage = `<p>${escapeHtml(message)}</p>`;
+    }
+    
+    // Construir el HTML del mensaje con avatar y contenido formateado
     messageDiv.innerHTML = `
         <div class="message-avatar">🤖</div>
-        <div class="message-content">
-            <p>${escapeHtml(message)}</p>
+        <div class="message-content markdown-content">
+            ${formattedMessage}
         </div>
     `;
     
