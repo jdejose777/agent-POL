@@ -1,0 +1,52 @@
+========================================
+   CÓMO LANZAR LA APLICACIÓN RAG
+========================================
+
+PASO 1: Navegar al directorio del backend
+------------------------------------------
+cd C:\agent-POL\backend-api
+
+
+PASO 2: Iniciar el servidor FastAPI
+------------------------------------
+C:\agent-POL\.venv\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000
+
+Espera a ver estos mensajes:
+  🤖 Cargando modelo sentence-transformers...
+  ✅ Modelo cargado correctamente
+  INFO: Application startup complete
+
+
+PASO 3: Abrir el frontend en el navegador
+------------------------------------------
+Abre en tu navegador:
+  C:\agent-POL\frontend\index.html
+
+O usa Chrome directamente:
+  start chrome C:\agent-POL\frontend\index.html
+
+
+PASO 4: Probar desde PowerShell (opcional)
+-------------------------------------------
+$body = @{ pregunta = "¿Qué es el homicidio?" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/chat" -Method POST -Body $body -ContentType "application/json"
+
+
+========================================
+   VERIFICAR QUE TODO FUNCIONA
+========================================
+
+✓ Servidor corriendo: http://127.0.0.1:8000/health
+✓ Documentación API: http://127.0.0.1:8000/docs
+✓ Endpoint principal: POST http://127.0.0.1:8000/chat
+
+
+========================================
+   NOTAS IMPORTANTES
+========================================
+
+- El servidor debe estar corriendo ANTES de abrir el frontend
+- Si cambias código, el servidor se recarga automáticamente (--reload)
+- Para detener el servidor: Ctrl + C en la terminal
+- Los embeddings se generan localmente (sin APIs externas)
+- Si Gemini falla, el sistema devuelve el contexto encontrado
