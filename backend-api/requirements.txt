@@ -1,9 +1,12 @@
-# Dependencias de Python para la API RAG
+# Dependencias de Python para la API RAG con Vertex AI
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
-requests>=2.32.0
 python-dotenv>=1.0.1
 pydantic>=2.10.0
-sentence-transformers>=3.3.1
-torch>=2.5.1
+
+# Google Cloud Vertex AI
 google-cloud-aiplatform>=1.38.0
+vertexai>=1.0.0
+
+# Pinecone Vector Database (nuevo nombre del paquete)
+pinecone>=5.0.0

@@ -1,31 +1,56 @@
 # main.py
 # Backend API para el sistema RAG de consultas legales
-# Versión con sentence-transformers LOCAL y Gemini API
+# Versión con Vertex AI (Google Cloud)
 
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import requests
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
+
+# --- IMPORTS ADICIONALES PARA RAG CON VERTEX AI ---
+from google.cloud import aiplatform
+from vertexai.language_models import TextEmbeddingModel
+from vertexai.generative_models import GenerativeModel
+from pinecone import Pinecone
+import vertexai
 
 # Cargar las variables de entorno desde .env
 load_dotenv()
 
-# --- 1. CONFIGURACIÓN Y CLAVES SECRETAS ---
+# --- 1. CONFIGURACIÓN DE VERTEX AI Y PINECONE ---
+PROJECT_ID = os.getenv("GCP_PROJECT_ID", "resolute-return-476416-g5")
+REGION = os.getenv("GCP_REGION", "us-central1")
+MODEL_NAME = "gemini-2.0-flash-001"  # Modelo de generación
+EMBEDDING_MODEL = "text-embedding-004"  # Modelo de embeddings de Google
+
+# Configuración de Pinecone
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "codigo-penal-vertex-ai")
+TOP_K_RESULTS = 3  # Número de fragmentos a recuperar
 
-# URLs de APIs
-PINECONE_HOST = "https://developer-quickstart-py-3oyi1w3.svc.aped-4627-b74a.pinecone.io/query"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+# --- INICIALIZACIÓN DE SERVICIOS ---
+print("🔧 Inicializando Vertex AI y Pinecone...")
+try:
+    # A. Inicializar Vertex AI
+    vertexai.init(project=PROJECT_ID, location=REGION)
+    print(f"✅ Vertex AI inicializado - Proyecto: {PROJECT_ID}, Región: {REGION}")
+    
+    # B. Inicializar Pinecone
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    PINECONE_INDEX = pc.Index(PINECONE_INDEX_NAME)
+    print(f"✅ Pinecone conectado - Índice: {PINECONE_INDEX_NAME}")
 
+    # C. Cargar Modelos de Vertex AI
+    EMBEDDING_CLIENT = TextEmbeddingModel.from_pretrained(EMBEDDING_MODEL)
+    LLM_CLIENT = GenerativeModel(MODEL_NAME)
+    print(f"✅ Modelos cargados - Embeddings: {EMBEDDING_MODEL}, LLM: {MODEL_NAME}")
+    
+    print("✅ ¡Inicialización completada con éxito!")
 
-# --- CARGAR MODELO DE EMBEDDINGS LOCAL ---
-print("🤖 Cargando modelo sentence-transformers...")
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-print("✅ Modelo cargado correctamente")
+except Exception as e:
+    print(f"❌ ERROR DE INICIALIZACIÓN: {e}")
+    raise
 
 
 # --- 2. MODELOS DE DATOS ---
@@ -55,110 +80,98 @@ app.add_middleware(
 )
 
 
-# --- 4. ENDPOINT PRINCIPAL ---
-@app.post("/chat", response_model=ChatResponse)
-async def handle_chat_request(request: ChatRequest):
+# --- 4. FUNCIÓN CENTRAL DE RAG CON VERTEX AI ---
+def generate_rag_response(query: str):
     """
-    Endpoint principal que procesa la pregunta del usuario y devuelve una respuesta
-    basada en el contexto del Código Penal.
+    Realiza la consulta RAG completa usando Vertex AI:
+    1. Genera embedding de la pregunta
+    2. Busca contexto relevante en Pinecone
+    3. Genera respuesta con Gemini via Vertex AI
     """
-    pregunta_usuario = request.pregunta
-    print(f"📝 Recibida pregunta: {pregunta_usuario}")
-
-    # --- PASO 1: Generar Embedding LOCAL con sentence-transformers ---
     try:
-        print("🔢 Generando embedding con sentence-transformers local...")
+        print(f"📝 Procesando pregunta: {query}")
         
-        # Generar embedding usando el modelo local
-        embedding_array = embedding_model.encode([pregunta_usuario])[0]
+        # --- PASO 1: GENERAR EMBEDDING CON VERTEX AI ---
+        print("🔢 Generando embedding con Vertex AI...")
+        embeddings = EMBEDDING_CLIENT.get_embeddings([query])
+        query_vector = embeddings[0].values
+        print(f"✅ Embedding generado: {len(query_vector)} dimensiones")
         
-        # Convertir a lista de Python para JSON
-        embedding = embedding_array.tolist()
+        # --- PASO 2: RECUPERACIÓN EN PINECONE ---
+        print("🔍 Buscando en Pinecone...")
+        results = PINECONE_INDEX.query(
+            vector=query_vector, 
+            top_k=TOP_K_RESULTS, 
+            include_metadata=True
+        )
         
-        print(f"✅ Embedding generado: {len(embedding)} dimensiones")
-
-    except Exception as e:
-        print(f"❌ Error al generar embedding: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al generar el embedding: {str(e)}")
-
-
-    # --- PASO 2: Buscar en Pinecone ---
-    try:
-        print("🔍 Buscando contexto en Pinecone...")
-        pinecone_headers = {
-            "Api-Key": PINECONE_API_KEY,
-            "Content-Type": "application/json"
-        }
-        pinecone_payload = {
-            "vector": embedding,
-            "topK": 5,
-            "includeMetadata": True,
-            "includeValues": False
-        }
-
-        response_pinecone = requests.post(PINECONE_HOST, headers=pinecone_headers, json=pinecone_payload, timeout=30)
-        response_pinecone.raise_for_status()
-
-        pinecone_data = response_pinecone.json()
-        matches = pinecone_data.get("matches", [])
-        
-        # Mostrar scores para debugging
-        if matches:
-            print(f"🔍 Scores encontrados: {[match.get('score', 0) for match in matches[:3]]}")
-        
-        # Filtrar solo matches con score alto (bajado a 0.3 para ser más permisivo)
+        # Filtrar por relevancia y construir contexto
         contexto_parts = []
-        metadata_info = []
-        for match in matches:
-            score = match.get("score", 0)
-            if score > 0.3:  # Umbral más bajo para capturar más resultados
-                text = match.get("metadata", {}).get("text", "")
-                articulo = match.get("metadata", {}).get("articulo", "N/A")
-                titulo = match.get("metadata", {}).get("titulo", "")
+        for match in results['matches']:
+            score = match.get('score', 0)
+            print(f"  📊 Match con score: {score:.3f}")
+            
+            # Filtro de calidad: solo matches con score > 0.5
+            if score > 0.5:
+                text = match.get('metadata', {}).get('text', '')
                 if text:
-                    # Agregar información del artículo y score
-                    contexto_parts.append(f"[Artículo {articulo} - Relevancia: {score:.2f}]\n{text}")
-                    metadata_info.append(f"Artículo {articulo}")
-                    print(f"  ✓ Match con score {score:.3f} - Artículo {articulo}")
+                    contexto_parts.append(f"[Fragmento del Código Penal - Relevancia: {score:.2f}]\n{text}")
+                    print(f"  ✓ Fragmento aceptado (score: {score:.3f})")
+        
+        # Fallback: si no hay resultados con 0.5, bajar a 0.4
+        if len(contexto_parts) == 0 and results['matches']:
+            print("⚠️ Sin matches > 0.5, bajando umbral a 0.4")
+            for match in results['matches']:
+                score = match.get('score', 0)
+                if score > 0.4:
+                    text = match.get('metadata', {}).get('text', '')
+                    if text:
+                        contexto_parts.append(f"[Fragmento del Código Penal - Relevancia: {score:.2f}]\n{text}")
         
         contexto = "\n\n---\n\n".join(contexto_parts)
         num_matches = len(contexto_parts)
         
-        print(f"📋 Contexto encontrado: {num_matches} fragmentos relevantes ({len(contexto)} caracteres)")
-
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error al contactar con Pinecone: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al buscar en la base de datos: {str(e)}")
-
-
-    # --- PASO 3: Generar Respuesta con Gemini (LLM) ---
-    if contexto:
-        articulos_encontrados = ", ".join(metadata_info) if metadata_info else "varios"
-        prompt = f"""Eres un asistente jurídico especializado en el Código Penal español. Responde basándote únicamente en el contexto proporcionado.
+        print(f"📋 Contexto construido: {num_matches} fragmentos ({len(contexto)} caracteres)")
+        
+        # --- PASO 3: CONSTRUIR PROMPT PROFESIONAL ---
+        if contexto:
+            prompt = f"""Eres un asistente jurídico especializado en derecho penal español. 
+Tienes acceso exclusivamente a un documento fuente: el Código Penal español (PDF). 
+Todas tus respuestas deben basarse **únicamente** en el contenido de ese documento, sin añadir información externa o inventada.
 
 PREGUNTA DEL USUARIO:
-{pregunta_usuario}
+{query}
 
-CONTEXTO RELEVANTE DEL CÓDIGO PENAL:
-Se encontraron {num_matches} fragmentos relevantes del Código Penal relacionados con tu pregunta ({articulos_encontrados}).
-
+CONTEXTO RECUPERADO DEL CÓDIGO PENAL (solo {num_matches} fragmentos más relevantes):
 {contexto}
 
-INSTRUCCIONES IMPORTANTES:
-- Responde ÚNICAMENTE basándote en el contexto proporcionado arriba
-- Cita SIEMPRE los artículos específicos mencionados en el contexto
-- Si la información no está completa en el contexto, indícalo claramente
-- Usa un lenguaje claro, profesional y preciso
-- Menciona las penas asociadas si están en el contexto
-- Estructura tu respuesta de forma clara con párrafos separados
-- NO inventes información que no esté en el contexto
+INSTRUCCIONES OBLIGATORIAS:
+1. Usa **solo el texto recuperado arriba** como base para tu respuesta. 
+2. Si el contexto recuperado no incluye el artículo completo, **indícalo claramente** ("el fragmento no contiene todo el artículo") y **no intentes completarlo**.
+3. Cuando cites artículos, usa esta estructura:
+   - "**Artículo [número]. [Título, si lo hay]**" seguido del texto literal.
+4. Si el usuario pide interpretación o resumen, **responde primero con el texto literal** y **luego** con una breve explicación, dejando claro qué parte es literal y cuál es explicativa.
+5. Si el contexto incluye varios artículos, **prioriza el más directamente relacionado** con la consulta.
+6. No incluyas artículos no solicitados a menos que el contexto lo justifique legalmente (por ejemplo, remisión explícita entre artículos).
+7. Si el artículo no se encuentra en el contexto, responde: 
+   > "No se ha encontrado el texto literal del artículo solicitado en el contexto recuperado. Verifique que el documento fuente lo incluya completo."
+
+FORMATO DE SALIDA ESPERADO:
+---
+**Artículo [número]. [Título]**
+"[Texto literal del Código Penal]"
+
+📘 *Explicación:* [Breve aclaración si es necesario]
+---
+
+Tu prioridad es la **exactitud literal** del Código Penal, no la fluidez o extensión del texto.
 
 RESPUESTA:"""
-    else:
-        prompt = f"""Eres un asistente jurídico especializado en el Código Penal español.
+        else:
+            prompt = f"""Eres un asistente jurídico especializado en el Código Penal español.
 
 PREGUNTA:
-{pregunta_usuario}
+{query}
 
 No se encontró información específica en el Código Penal para responder a esta pregunta.
 
@@ -168,92 +181,93 @@ Responde educadamente explicando que:
 3. Recuerda que solo puedes consultar sobre el Código Penal español
 
 RESPUESTA:"""
-    
-    # --- PASO 3: Generar Respuesta con Gemini API ---
-    try:
-        print("⚖️ Llamando a Gemini API para generar respuesta...")
         
-        if not GEMINI_API_KEY:
-            raise Exception("GEMINI_API_KEY no está configurada en el .env")
+        # --- PASO 4: LLAMAR A GEMINI VIA VERTEX AI ---
+        print("⚖️ Generando respuesta con Gemini (Vertex AI)...")
+        response = LLM_CLIENT.generate_content(prompt)
+        respuesta_texto = response.text
         
-        # Preparar headers y payload para Gemini API
-        gemini_headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": GEMINI_API_KEY
+        print("✅ Respuesta generada exitosamente")
+        
+        return {
+            "respuesta": respuesta_texto,
+            "metadata": {
+                "num_fragmentos": num_matches,
+                "tiene_contexto": bool(contexto),
+                "modelo": MODEL_NAME,
+                "embedding_model": EMBEDDING_MODEL
+            }
         }
-        
-        gemini_payload = {
-            "contents": [{
-                "parts": [{"text": prompt}]
-            }]
-        }
-        
-        # Hacer petición a Gemini API
-        response_gemini = requests.post(GEMINI_URL, headers=gemini_headers, json=gemini_payload, timeout=30)
-        response_gemini.raise_for_status()
-        
-        gemini_data = response_gemini.json()
-        respuesta_final = gemini_data["candidates"][0]["content"]["parts"][0]["text"]
-        
-        print("✅ Respuesta generada con éxito")
 
     except Exception as e:
-        print(f"⚠️ Error al contactar con Gemini: {e}")
-        print("🔄 Generando respuesta basada en el contexto disponible...")
-        
-        # Respuesta de fallback con el contexto encontrado
-        if contexto:
-            respuesta_final = f"""**[MODO DEMOSTRACIÓN - API Gemini no disponible]**
-
-**Contexto encontrado en el Código Penal sobre tu pregunta:**
-
-{contexto[:1500]}...
-
----
-*Nota: Se encontraron {num_matches} fragmentos relevantes en la base de datos. Para obtener respuestas generadas por IA, verifica la API key de Gemini.*"""
-        else:
-            respuesta_final = "**[MODO DEMOSTRACIÓN]** No se encontró información relevante en la base de datos. Verifica la configuración de la API de Gemini para obtener respuestas generadas por IA."
-        
-        print("✅ Respuesta de demostración generada")
-        
-    except (KeyError, IndexError) as e:
-        print(f"❌ Error al procesar respuesta de Gemini: {e}")
-        raise HTTPException(status_code=500, detail=f"Error al procesar respuesta de Gemini: {str(e)}")
-
-
-    # --- PASO 4: Devolver la Respuesta Final ---
+        print(f"❌ Error en el proceso RAG: {e}")
+        return {
+            "respuesta": f"Disculpa, ha ocurrido un error al consultar la base de datos de documentos: {str(e)}",
+            "metadata": {
+                "error": True,
+                "mensaje_error": str(e)
+            }
+        }
+# --- 5. ENDPOINT PRINCIPAL DE CHAT ---
+@app.post("/chat", response_model=ChatResponse)
+async def handle_chat_request(request: ChatRequest):
+    """
+    Endpoint principal que procesa la pregunta del usuario y devuelve una respuesta
+    basada en el contexto del Código Penal usando Vertex AI.
+    """
+    pregunta_usuario = request.pregunta
+    print(f"\n{'='*60}")
+    print(f"� Nueva petición recibida")
+    print(f"{'='*60}")
+    
+    # Llamar a la función RAG con Vertex AI
+    resultado = generate_rag_response(pregunta_usuario)
+    
     return ChatResponse(
-        respuesta=respuesta_final,
+        respuesta=resultado["respuesta"],
         metadata={
             "pregunta": pregunta_usuario,
-            "tieneContexto": bool(contexto),
-            "numeroResultados": num_matches,
-            "modelo": "gemini-1.5-flash",
-            "dominio": "codigo-penal-espanol"
+            "tieneContexto": resultado["metadata"].get("tiene_contexto", False),
+            "numeroResultados": resultado["metadata"].get("num_fragmentos", 0),
+            "modelo": resultado["metadata"].get("modelo", MODEL_NAME),
+            "dominio": "codigo-penal-espanol",
+            "proveedor": "Vertex AI (Google Cloud)"
         }
     )
 
 
-# --- 5. ENDPOINT DE SALUD ---
+# --- 6. ENDPOINT DE SALUD ---
 @app.get("/health")
 async def health_check():
     """Endpoint para verificar que la API está funcionando"""
     return {
         "status": "healthy",
-        "service": "RAG API - Código Penal",
-        "version": "1.0.0"
+        "service": "RAG API - Código Penal (Vertex AI)",
+        "version": "2.0.0",
+        "provider": "Google Cloud Vertex AI",
+        "models": {
+            "llm": MODEL_NAME,
+            "embeddings": EMBEDDING_MODEL
+        }
     }
 
 
-# --- 6. ENDPOINT DE INFORMACIÓN ---
+# --- 7. ENDPOINT DE INFORMACIÓN ---
 @app.get("/")
 async def root():
     """Información básica de la API"""
     return {
-        "message": "API RAG - Código Penal Español",
+        "message": "API RAG - Código Penal Español (Vertex AI)",
+        "version": "2.0.0",
+        "provider": "Google Cloud Platform",
         "endpoints": {
             "chat": "/chat (POST)",
             "health": "/health (GET)",
             "docs": "/docs (Documentación interactiva)"
+        },
+        "models": {
+            "generacion": MODEL_NAME,
+            "embeddings": EMBEDDING_MODEL
         }
     }
+
