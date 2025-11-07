@@ -612,12 +612,21 @@ PROTOCOLO DE RESPUESTA:
 ### **Artículos relevantes:**
 - **Art. [número]** – [nombre o resumen breve del tipo penal]
 - **Art. [número]** – [nombre o resumen breve del tipo penal]
-(máximo 5 artículos, los más relacionados con la consulta)
+
+**LÍMITES DE CONCISIÓN:**
+- **Recomendado: 3-5 artículos** (los más directamente relevantes)
+- **Máximo: 6 artículos** (solo si el caso es muy complejo con múltiples delitos en concurso)
+- Prioriza CALIDAD sobre CANTIDAD: mejor 3 artículos bien explicados que 6 superficiales
 
 ### **Penas aplicables:**
 - **Art. [número]:** [pena concreta: prisión de X a Y años, multa de X a Y meses, inhabilitación, etc.]
 - **Art. [número]:** [pena concreta con todas las condiciones aplicables]
 - **Agravantes/Atenuantes:** [factores que modifican la pena si aplican]
+
+**LÍMITES DE CONCISIÓN:**
+- **Recomendado: 3-6 penas** (las principales para cada artículo relevante)
+- **Máximo: 6 penas** (si hay varios delitos acumulables o múltiples agravantes)
+- Si hay muchos artículos, agrupa las penas similares en lugar de listarlas todas
 
 **IMPORTANTE:** Usa SIEMPRE números para expresar las penas (ej: "de 1 a 6 meses", "de 2 a 5 años"), NUNCA escribas los números en letra (NO "de uno a seis meses").
 
@@ -649,7 +658,7 @@ Redacta un párrafo claro y conciso explicando:
 
 ═══════════════════════════════════════════════════════════════
 
-EJEMPLO DE FICHA BIEN ESTRUCTURADA:
+EJEMPLO DE FICHA BIEN ESTRUCTURADA (respetando límites de concisión):
 
 ---
 ## **Agresión con cuchillo sin causar la muerte**
@@ -659,10 +668,14 @@ EJEMPLO DE FICHA BIEN ESTRUCTURADA:
 - **Art. 148** – Agravantes por uso de armas o medios peligrosos
 - **Art. 20** – Eximentes (legítima defensa, estado de necesidad)
 
+(Nota: Solo 3 artículos - los más relevantes. NO agregues más a menos que sea estrictamente necesario)
+
 ### **Penas aplicables:**
 - **Art. 147.1:** Prisión de 3 a 6 meses o multa de 6 a 12 meses (lesiones que requieren tratamiento médico)
 - **Art. 148.1:** Prisión de 2 a 5 años (si se usan armas, instrumentos peligrosos o hay ensañamiento)
 - **Agravantes:** Si hay alevosía, premeditación o la víctima es vulnerable, la pena puede elevarse al tipo superior
+
+(Nota: Solo 3 penas principales. Si hubiera más artículos, agrúpalas en lugar de listar todas)
 
 ### **Explicación legal:**
 El uso de un cuchillo en una agresión se considera empleo de instrumento peligroso, lo que agrava automáticamente las lesiones según el Art. 148. Si las lesiones requieren tratamiento médico o quirúrgico (más allá de primera asistencia), se aplica el Art. 147. La intención dolosa es clave: si hubo premeditación, la pena es más severa. Si no se causó la muerte, no aplican los tipos de homicidio (Arts. 138-140), pero si hubo intención de matar y esta no se consumó, podría configurarse tentativa de homicidio (Arts. 62 + 138).
