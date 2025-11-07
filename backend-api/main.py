@@ -222,15 +222,16 @@ def generate_rag_response(query: str):
 
 El usuario preguntó: "{query}"
 
-Aquí está el texto LITERAL del artículo encontrado:
+Aquí está el texto LITERAL y COMPLETO del artículo encontrado:
 
 {texto_corregido}
 
-Instrucciones:
+INSTRUCCIONES:
 1. Responde con el texto COMPLETO del artículo tal como aparece
 2. NO resumas ni parafrasees - cita el texto literal
 3. Organiza el contenido de forma clara usando formato Markdown
 4. Mantén TODOS los apartados, números y subapartados
+5. Usa el formato: **Artículo [número].** seguido del texto completo
 
 Responde ahora:"""
 
@@ -305,39 +306,97 @@ Responde ahora:"""
         print(f"📋 Contexto construido: {num_matches} fragmentos ({len(contexto)} caracteres)")
 
         # --- PASO 7: GENERAR RESPUESTA CON GEMINI ---
-        prompt = f"""Eres un asistente jurídico especializado en derecho penal español. 
-Tu tarea es proporcionar información del Código Penal español basándote EXCLUSIVAMENTE en el contexto que te proporcionan.
+        prompt = f"""Actúa como un asistente jurídico especializado en Derecho Penal español. Tu conocimiento se basa exclusivamente en el texto oficial del Código Penal.
 
-PREGUNTA DEL USUARIO:
+CONSULTA DEL USUARIO:
 {query}
 
 CONTEXTO RECUPERADO ({num_matches} fragmentos del Código Penal):
 {contexto}
 
-INSTRUCCIONES CRÍTICAS:
-1. **Si el usuario menciona un número de artículo** (como "138", "artículo 138", "art. 138"):
-   - Busca ESE número de artículo en el contexto recuperado
-   - Si lo encuentras, muéstralo COMPLETO con su texto literal
-   - Usa el formato: **Artículo [número].** seguido del texto
-   
-2. **Si el contexto contiene el artículo solicitado**: Muéstralo aunque sea parcial, indicando si está incompleto
+═══════════════════════════════════════════════════════════════
 
-3. **Si no encuentras el artículo en el contexto**: Di claramente "El artículo X no se encuentra en los fragmentos recuperados"
+PROTOCOLO DE RESPUESTA:
 
-4. Para preguntas conceptuales (ej: "¿Qué es el homicidio?"):
-   - Identifica el artículo relevante en el contexto
-   - Cita su contenido literal
-   - Añade una explicación breve
+**1. Si el usuario pregunta por un artículo específico** (ej: "142", "artículo 138"):
+   - Muestra el texto COMPLETO y LITERAL del artículo
+   - Formato: **Artículo [número].** seguido del texto completo
+   - NO resumas, cita el texto tal como aparece en el Código Penal
+   - NO apliques el formato de ficha estructurada
 
-FORMATO DE RESPUESTA:
+**2. Si es una consulta conceptual sobre un delito o situación** (ej: "violación a menor", "robo de coche con accidente"):
+   Genera una ficha legal completa, clara y visualmente ordenada con este formato:
+
 ---
-**Artículo [número].**
-[Texto literal del Código Penal tal como aparece en el contexto]
+## **[TÍTULO DEL DELITO]**
 
-📘 [Explicación breve solo si es necesario]
+### **Artículos relevantes:**
+- **Art. [número]** – [nombre o resumen breve del tipo penal]
+- **Art. [número]** – [nombre o resumen breve del tipo penal]
+(máximo 5 artículos, los más relacionados con la consulta)
+
+### **Penas aplicables:**
+- **Art. [número]:** [pena concreta: prisión de X a Y años, multa de X a Y meses, inhabilitación, etc.]
+- **Art. [número]:** [pena concreta con todas las condiciones aplicables]
+- **Agravantes/Atenuantes:** [factores que modifican la pena si aplican]
+
+**IMPORTANTE:** Usa SIEMPRE números para expresar las penas (ej: "de 1 a 6 meses", "de 2 a 5 años"), NUNCA escribas los números en letra (NO "de uno a seis meses").
+
+### **Explicación legal:**
+Redacta un párrafo claro y conciso explicando:
+- Cómo encaja el delito en el Código Penal
+- Cuándo se aplicaría cada artículo según el contexto (violencia, imprudencia, dolo, etc.)
+- Qué factores agravan o atenúan la pena
+- Si hay dolo (intención) o imprudencia
+- Si el delito no aparece directamente, qué artículos lo cubren por analogía
+
+### **Resumen final:**
+**→** [Resumen corto tipo fórmula: delito + agravantes + artículos principales]  
+**→** [Rango de penas aproximado: prisión de X a Y años + multa + inhabilitación + otras consecuencias]
+
+**IMPORTANTE:** En el resumen también usa números para las penas (ej: "de 2 a 5 años"), no los escribas en letra.
+
 ---
 
-RESPONDE AHORA basándote únicamente en el contexto proporcionado:"""
+**3. Reglas de estilo y contenido:**
+   - Mantén un tono profesional, directo y visualmente limpio
+   - Prioriza la claridad: cada punto debe poder leerse en 10-15 segundos
+   - Usa terminología legal precisa (NO uses "aproximadamente", "más o menos")
+   - Diferencia claramente entre dolo (intención) e imprudencia
+   - SIEMPRE menciona las penas exactas (prisión, multa, inhabilitación)
+   - Basa tu respuesta EXCLUSIVAMENTE en el contexto proporcionado
+   - No incluyas notas doctrinales, jurisprudencia ni referencias externas
+   - Si falta información clave, indícalo claramente
+
+═══════════════════════════════════════════════════════════════
+
+EJEMPLO DE FICHA BIEN ESTRUCTURADA:
+
+---
+## **Agresión con cuchillo sin causar la muerte**
+
+### **Artículos relevantes:**
+- **Art. 147** – Lesiones dolosas con instrumento peligroso
+- **Art. 148** – Agravantes por uso de armas o medios peligrosos
+- **Art. 20** – Eximentes (legítima defensa, estado de necesidad)
+
+### **Penas aplicables:**
+- **Art. 147.1:** Prisión de 3 a 6 meses o multa de 6 a 12 meses (lesiones que requieren tratamiento médico)
+- **Art. 148.1:** Prisión de 2 a 5 años (si se usan armas, instrumentos peligrosos o hay ensañamiento)
+- **Agravantes:** Si hay alevosía, premeditación o la víctima es vulnerable, la pena puede elevarse al tipo superior
+
+### **Explicación legal:**
+El uso de un cuchillo en una agresión se considera empleo de instrumento peligroso, lo que agrava automáticamente las lesiones según el Art. 148. Si las lesiones requieren tratamiento médico o quirúrgico (más allá de primera asistencia), se aplica el Art. 147. La intención dolosa es clave: si hubo premeditación, la pena es más severa. Si no se causó la muerte, no aplican los tipos de homicidio (Arts. 138-140), pero si hubo intención de matar y esta no se consumó, podría configurarse tentativa de homicidio (Arts. 62 + 138).
+
+### **Resumen final:**
+**→** Agresión con cuchillo + lesiones = Arts. 147 + 148 = delito doloso contra la integridad física  
+**→** Penas: Prisión de 2 a 5 años + posible indemnización a la víctima + antecedentes penales
+
+(Nota: Fíjate que las penas se escriben con NÚMEROS: "2 a 5 años", no "dos a cinco años")
+
+---
+
+RESPONDE AHORA:"""
 
         print("⚖️ Generando respuesta con Gemini (Vertex AI)...")
         response = LLM_CLIENT.generate_content(prompt)
