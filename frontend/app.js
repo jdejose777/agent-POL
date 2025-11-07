@@ -138,7 +138,15 @@ async function sendMessageToWebhook(pregunta) {
     }
     
     console.log('🌐 Enviando petición a:', WEBHOOK_URL);
-    console.log('💬 Historial: ', conversationHistory.length, 'mensajes');
+    console.log('💬 Historial actual:', conversationHistory.length, 'mensajes');
+    
+    // ⚡ IMPORTANTE: Mostrar el historial que se va a enviar
+    if (conversationHistory.length > 0) {
+        console.log('📋 Enviando historial:');
+        conversationHistory.forEach((msg, idx) => {
+            console.log(`   ${idx + 1}. ${msg.role}: ${msg.content.substring(0, 50)}...`);
+        });
+    }
     
     try {
         // Realizar petición POST con fetch, incluyendo el historial
@@ -165,7 +173,7 @@ async function sendMessageToWebhook(pregunta) {
         
         console.log('📨 Respuesta del webhook recibida:', data);
         
-        // Guardar en el historial conversacional
+        // ⚡ DESPUÉS de recibir respuesta, guardar AMBOS mensajes en el historial
         conversationHistory.push({
             role: "user",
             content: pregunta
@@ -183,7 +191,7 @@ async function sendMessageToWebhook(pregunta) {
             conversationHistory = conversationHistory.slice(-10);
         }
         
-        console.log('💾 Historial actualizado:', conversationHistory.length, 'mensajes');
+        console.log('💾 Historial actualizado a:', conversationHistory.length, 'mensajes');
         
         return respuestaBot;
         
