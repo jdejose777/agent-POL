@@ -80,3 +80,6 @@ descargas-nodelaapp/
 *.pdf
 test_files/
 temp/
+
+# Carpeta de tests (no subir al repositorio)
+test/

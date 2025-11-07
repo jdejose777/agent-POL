@@ -16,6 +16,7 @@ const loadingIndicator = document.getElementById('loadingIndicator');
 // Estado de la aplicación
 let isLoading = false;
 let typingIndicatorElement = null;
+let conversationHistory = []; // ⚡ MEJORA #3: Historial conversacional
 
 /**
  * INICIALIZACIÓN DE LA APLICACIÓN
@@ -125,6 +126,8 @@ async function handleFormSubmit(e) {
 /**
  * ENVÍO DE MENSAJE AL WEBHOOK DE N8N
  * Realiza la petición HTTP al webhook con el mensaje del usuario
+ * 
+ * ⚡ MEJORA #3: Incluye historial conversacional en cada petición
  */
 async function sendMessageToWebhook(pregunta) {
     console.log('🌐 Enviando petición al webhook de n8n...');
@@ -135,18 +138,20 @@ async function sendMessageToWebhook(pregunta) {
     }
     
     console.log('🌐 Enviando petición a:', WEBHOOK_URL);
+    console.log('💬 Historial: ', conversationHistory.length, 'mensajes');
     
     try {
-        // Realizar petición POST con fetch
+        // Realizar petición POST con fetch, incluyendo el historial
         const response = await fetch(WEBHOOK_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            // Cuerpo de la petición en formato JSON
+            // Cuerpo de la petición en formato JSON con historial
             body: JSON.stringify({
-                pregunta: pregunta
+                pregunta: pregunta,
+                historial: conversationHistory  // ⚡ Enviar historial conversacional
             })
         });
         
@@ -160,10 +165,27 @@ async function sendMessageToWebhook(pregunta) {
         
         console.log('📨 Respuesta del webhook recibida:', data);
         
-        // Extraer la respuesta del bot (ajusta según la estructura de tu webhook)
-        // Asumimos que el webhook devuelve { "respuesta": "texto del bot" }
-        // Ajusta esta línea según el formato real de tu webhook
-        return data.respuesta || data.response || data.message || 'Respuesta recibida del sistema RAG';
+        // Guardar en el historial conversacional
+        conversationHistory.push({
+            role: "user",
+            content: pregunta
+        });
+        
+        const respuestaBot = data.respuesta || data.response || data.message || 'Respuesta recibida del sistema RAG';
+        
+        conversationHistory.push({
+            role: "assistant",
+            content: respuestaBot
+        });
+        
+        // Limitar historial a últimos 10 mensajes (5 intercambios) para no sobrecargar
+        if (conversationHistory.length > 10) {
+            conversationHistory = conversationHistory.slice(-10);
+        }
+        
+        console.log('💾 Historial actualizado:', conversationHistory.length, 'mensajes');
+        
+        return respuestaBot;
         
     } catch (error) {
         console.error('🚨 Error en la petición al webhook:', error);
@@ -406,7 +428,8 @@ const ChatUtils = {
     clearChat: () => {
         const messages = chatContainer.querySelectorAll('.message:not(.welcome-message .message)');
         messages.forEach(msg => msg.remove());
-        console.log('🧹 Chat limpiado');
+        conversationHistory = [];  // ⚡ Limpiar también el historial conversacional
+        console.log('🧹 Chat e historial limpiados');
     },
     
     // Exportar la conversación como archivo de texto

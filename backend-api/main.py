@@ -90,8 +90,15 @@ except Exception as e:
 
 
 # --- 2. MODELOS DE DATOS ---
+class ChatMessage(BaseModel):
+    """Modelo para un mensaje en el historial de conversación"""
+    role: str  # "user" o "assistant"
+    content: str
+
+
 class ChatRequest(BaseModel):
     pregunta: str
+    historial: list[ChatMessage] = []  # ⚡ MEJORA #3: Historial conversacional
 
 
 class ChatResponse(BaseModel):
@@ -164,28 +171,36 @@ def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
 
 def corregir_encoding(texto: str) -> str:
     """
-    Corrige problemas de encoding comunes en el PDF del Código Penal
+    Corrige problemas de encoding usando ftfy (automático y robusto).
+    
+    ⚡ MEJORA #2: Corrección automática con ftfy en lugar de reemplazos manuales
     """
-    # Reemplazos básicos de caracteres corruptos
-    texto = texto.replace('Ã­', 'í')
-    texto = texto.replace('Ã³', 'ó')
-    texto = texto.replace('Ã±', 'ñ')
-    texto = texto.replace('Ã¡', 'á')
-    texto = texto.replace('Ã©', 'é')
-    texto = texto.replace('Ãº', 'ú')
-    texto = texto.replace('Ã¼', 'ü')
-    texto = texto.replace('Ã¶', 'ö')
-    
-    # Mayúsculas
-    texto = texto.replace('Ã', 'Á')
-    texto = texto.replace('Ã‰', 'É')
-    texto = texto.replace('Ã"', 'Ó')
-    texto = texto.replace('Ãš', 'Ú')
-    
-    # Eliminar caracteres basura
-    texto = texto.replace('Â', '')
-    
-    return texto
+    try:
+        import ftfy
+        # ftfy detecta y corrige automáticamente problemas de encoding
+        texto_corregido = ftfy.fix_text(texto)
+        return texto_corregido
+    except ImportError:
+        # Fallback a reemplazos manuales si ftfy no está disponible
+        texto = texto.replace('Ã­', 'í')
+        texto = texto.replace('Ã³', 'ó')
+        texto = texto.replace('Ã±', 'ñ')
+        texto = texto.replace('Ã¡', 'á')
+        texto = texto.replace('Ã©', 'é')
+        texto = texto.replace('Ãº', 'ú')
+        texto = texto.replace('Ã¼', 'ü')
+        texto = texto.replace('Ã¶', 'ö')
+        
+        # Mayúsculas
+        texto = texto.replace('Ã', 'Á')
+        texto = texto.replace('Ã‰', 'É')
+        texto = texto.replace('Ã"', 'Ó')
+        texto = texto.replace('Ãš', 'Ú')
+        
+        # Eliminar caracteres basura
+        texto = texto.replace('Â', '')
+        
+        return texto
 
 
 def detectar_articulos_en_chunks(chunks: list) -> dict:
@@ -389,19 +404,41 @@ def decidir_estrategia_busqueda(query: str, numero_articulo: str = None) -> dict
     }
 
 
-def generate_rag_response(query: str):
+def generate_rag_response(query: str, historial: list = None):
     """
-    Sistema RAG híbrido con búsqueda exacta + vector search.
+    Sistema RAG híbrido con búsqueda exacta + vector search + memoria conversacional.
     
-    1. Detecta si es consulta de artículo específico
-    2. Intenta búsqueda exacta con regex primero
-    3. Si no encuentra, usa RAG con embeddings
-    4. Corrige encoding en todos los resultados
+    ⚡ MEJORA #3: Soporte para historial conversacional
+    
+    1. Enriquece la consulta con contexto del historial (si aplica)
+    2. Detecta si es consulta de artículo específico
+    3. Intenta búsqueda exacta con regex primero
+    4. Si no encuentra, usa RAG con embeddings
+    5. Corrige encoding en todos los resultados
     """
     try:
         print(f"\n{'='*80}")
         print(f"📨 CONSULTA: {query}")
+        if historial:
+            print(f"💬 Historial: {len(historial)} mensajes previos")
         print(f"{'='*80}")
+
+        # --- PASO 0.5: ENRIQUECER CONSULTA CON CONTEXTO CONVERSACIONAL ---
+        query_enriquecida = query
+        if historial and len(historial) > 0:
+            # Si la consulta es muy corta y parece ser de seguimiento, agregar contexto
+            palabras_seguimiento = ['y', 'también', 'además', 'qué más', 'otra', 'ese', 'esa', 'cuál', 'pena']
+            es_seguimiento = any(palabra in query.lower() for palabra in palabras_seguimiento) and len(query.split()) < 5
+            
+            if es_seguimiento:
+                # Tomar último mensaje del usuario y última respuesta
+                contexto_previo = ""
+                for msg in historial[-2:]:  # Últimos 2 mensajes
+                    if msg.role == "user":
+                        contexto_previo += f" {msg.content}"
+                
+                query_enriquecida = f"{contexto_previo.strip()} {query}"
+                print(f"🔗 Consulta enriquecida con contexto: {query_enriquecida[:100]}...")
 
         # --- PASO 1: DETECTAR NÚMERO DE ARTÍCULO ---
         import re
@@ -409,8 +446,8 @@ def generate_rag_response(query: str):
         solo_numero_pattern = r'^\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\s*$'
         
         numero_articulo = None
-        match_articulo = re.search(articulo_pattern, query, re.IGNORECASE)
-        match_numero = re.match(solo_numero_pattern, query)
+        match_articulo = re.search(articulo_pattern, query_enriquecida, re.IGNORECASE)
+        match_numero = re.match(solo_numero_pattern, query_enriquecida)
         
         if match_articulo:
             numero_articulo = match_articulo.group(1)
@@ -753,14 +790,20 @@ async def handle_chat_request(request: ChatRequest):
     """
     Endpoint principal que procesa la pregunta del usuario y devuelve una respuesta
     basada en el contexto del Código Penal usando Vertex AI.
+    
+    ⚡ MEJORA #3: Soporte para historial conversacional
     """
     pregunta_usuario = request.pregunta
+    historial = request.historial if hasattr(request, 'historial') else []
+    
     print(f"\n{'='*60}")
-    print(f"� Nueva petición recibida")
+    print(f"📨 Nueva petición recibida")
+    if historial:
+        print(f"💬 Con historial de {len(historial)} mensajes")
     print(f"{'='*60}")
     
-    # Llamar a la función RAG con Vertex AI
-    resultado = generate_rag_response(pregunta_usuario)
+    # Llamar a la función RAG con Vertex AI, pasando el historial
+    resultado = generate_rag_response(pregunta_usuario, historial)
     
     return ChatResponse(
         respuesta=resultado["respuesta"],
