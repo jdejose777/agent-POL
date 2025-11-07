@@ -34,8 +34,9 @@ TOP_K_MAX = 30  # Máximo para consultas complejas
 # --- INICIALIZACIÓN DE SERVICIOS ---
 print("🔧 Inicializando Vertex AI y Pinecone...")
 
-# Variable global para texto completo del PDF (para búsqueda exacta)
+# Variables globales para búsqueda exacta y cache
 TEXTO_COMPLETO_PDF = None
+ARTICULOS_CACHE = {}  # Cache: {numero_articulo: texto_completo_articulo}
 
 try:
     # A. Inicializar Vertex AI
@@ -55,6 +56,7 @@ try:
     # D. Cargar texto completo del PDF para búsqueda exacta
     try:
         import PyPDF2
+        import re
         pdf_path = "../documentos/codigo_penal.pdf"
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
@@ -63,6 +65,20 @@ try:
                 texto_paginas.append(page.extract_text())
             TEXTO_COMPLETO_PDF = "\n".join(texto_paginas)
             print(f"✅ PDF cargado para búsqueda exacta ({len(TEXTO_COMPLETO_PDF)} caracteres)")
+            
+        # E. Construir cache de artículos para búsqueda ultra-rápida (⚡ Mejora #1)
+        print("🔄 Construyendo cache de artículos...")
+        # Patrón para extraer artículos completos con sus números
+        patron_articulos = r'(Artículo\s+(\d+(?:\s+bis|\s+ter|\s+quater)?)\..*?)(?=\n\s*Artículo\s+\d+|\Z)'
+        matches = re.finditer(patron_articulos, TEXTO_COMPLETO_PDF, re.DOTALL | re.IGNORECASE)
+        
+        for match in matches:
+            numero_articulo = match.group(2).strip()
+            texto_articulo = match.group(1).strip()
+            ARTICULOS_CACHE[numero_articulo] = texto_articulo
+        
+        print(f"✅ Cache construido: {len(ARTICULOS_CACHE)} artículos indexados para búsqueda instantánea")
+        
     except Exception as e:
         print(f"⚠️ No se pudo cargar PDF completo: {e} (búsqueda exacta deshabilitada)")
     
@@ -104,13 +120,23 @@ app.add_middleware(
 
 def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
     """
-    Busca un artículo específico en el texto completo del PDF usando regex.
+    Busca un artículo específico usando cache O(1) o fallback a regex O(n).
     Soporta artículos simples (142) y con sufijos (142 bis, 127 ter, etc.)
+    
+    ⚡ MEJORA #1: Búsqueda instantánea desde cache construido al inicio
     """
     import re
     
-    # Normalizar el número de artículo (puede venir como "127 bis" o "127")
+    # Normalizar el número de artículo
     numero_articulo = numero_articulo.strip()
+    
+    # ⚡ PASO 1: Buscar en cache primero (O(1) - instantáneo)
+    if numero_articulo in ARTICULOS_CACHE:
+        print(f"⚡ Artículo {numero_articulo} encontrado en cache (búsqueda instantánea)")
+        return ARTICULOS_CACHE[numero_articulo]
+    
+    # PASO 2: Si no está en cache, buscar con regex (O(n) - lento)
+    print(f"🔍 Artículo {numero_articulo} no en cache, buscando con regex...")
     
     # Si tiene bis/ter/quater, buscar exactamente ese artículo
     if re.search(r'\b(bis|ter|quater)\b', numero_articulo, re.IGNORECASE):
@@ -126,8 +152,11 @@ def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
         # Incluir el encabezado completo "Artículo N"
         texto_articulo = match.group(0).strip()
         
+        # Guardar en cache para futuras búsquedas
+        ARTICULOS_CACHE[numero_articulo] = texto_articulo
+        print(f"💾 Artículo {numero_articulo} guardado en cache")
+        
         # NO truncar - devolver el artículo completo
-        # Si es muy largo, el flujo principal decidirá si pasarlo por Gemini
         return texto_articulo
     
     return None
