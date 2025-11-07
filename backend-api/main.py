@@ -27,7 +27,9 @@ EMBEDDING_MODEL = "text-embedding-004"  # Modelo de embeddings de Google
 # Configuración de Pinecone
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "codigo-penal-vertex-ai")
-TOP_K_RESULTS = 10  # Aumentado para capturar más contexto y encontrar artículos específicos
+TOP_K_RESULTS = 20  # Aumentado a 20 para mayor cobertura de artículos largos partidos
+TOP_K_MIN = 10  # Mínimo para consultas simples
+TOP_K_MAX = 30  # Máximo para consultas complejas
 
 # --- INICIALIZACIÓN DE SERVICIOS ---
 print("🔧 Inicializando Vertex AI y Pinecone...")
@@ -157,6 +159,207 @@ def corregir_encoding(texto: str) -> str:
     return texto
 
 
+def detectar_articulos_en_chunks(chunks: list) -> dict:
+    """
+    Analiza chunks recuperados y detecta qué artículos aparecen y cuántas partes tienen.
+    Retorna: {numero_articulo: [lista de chunks con ese artículo]}
+    """
+    import re
+    articulos_encontrados = {}
+    
+    for idx, chunk in enumerate(chunks):
+        texto = chunk.get('metadata', {}).get('text', '')
+        
+        # Buscar todos los artículos mencionados en este chunk
+        matches = re.finditer(r'Art[íi]culo\s+(\d+(?:\s+bis|\s+ter|\s+quater)?)', texto, re.IGNORECASE)
+        
+        for match in matches:
+            num_articulo = match.group(1).strip()
+            
+            if num_articulo not in articulos_encontrados:
+                articulos_encontrados[num_articulo] = []
+            
+            articulos_encontrados[num_articulo].append({
+                'chunk_index': idx,
+                'score': chunk.get('score', 0),
+                'texto': texto,
+                'posicion_articulo': match.start()
+            })
+    
+    return articulos_encontrados
+
+
+def es_articulo_incompleto(texto: str) -> bool:
+    """
+    Detecta si un chunk contiene un artículo incompleto.
+    Heurísticas:
+    - Termina abruptamente (no termina en punto)
+    - Contiene "..." o texto cortado
+    - Tiene numeración incompleta (1., 2., pero no cierra)
+    """
+    import re
+    
+    texto_limpio = texto.strip()
+    
+    # Heurística 1: No termina en punto ni en paréntesis de cierre
+    if not texto_limpio.endswith(('.', ')', '»', '"')):
+        return True
+    
+    # Heurística 2: Contiene indicadores de truncado
+    if '...' in texto_limpio or '[truncado]' in texto_limpio.lower():
+        return True
+    
+    # Heurística 3: Tiene numeración sin cerrar (ej: "1. xxx 2. xxx 3." pero sin texto después del 3)
+    numeros = re.findall(r'\n\s*(\d+)\.\s+', texto_limpio)
+    if len(numeros) >= 2:
+        ultimo_numero = numeros[-1]
+        # Verificar si después del último número hay texto sustancial
+        patron = rf'{ultimo_numero}\.\s+(.+)$'
+        match = re.search(patron, texto_limpio, re.DOTALL)
+        if match and len(match.group(1).strip()) < 20:
+            return True
+    
+    return False
+
+
+def reconstruir_articulos_completos(articulos_detectados: dict, chunks_originales: list) -> dict:
+    """
+    Para artículos que aparecen partidos, intenta reconstruirlos usando:
+    1. Combinación de múltiples chunks si están disponibles
+    2. Búsqueda exacta en PDF completo si es necesario
+    
+    Retorna: {numero_articulo: texto_completo_reconstruido}
+    """
+    articulos_reconstruidos = {}
+    
+    for num_articulo, partes in articulos_detectados.items():
+        # Ordenar partes por posición en el texto (usando chunk_index como proxy)
+        partes_ordenadas = sorted(partes, key=lambda x: x['chunk_index'])
+        
+        # CASO 1: Solo hay 1 parte
+        if len(partes_ordenadas) == 1:
+            texto = partes_ordenadas[0]['texto']
+            
+            # Verificar si parece incompleto
+            if es_articulo_incompleto(texto):
+                print(f"  ⚠️ Art. {num_articulo} parece incompleto (1 chunk) - buscando en PDF completo...")
+                
+                # Intentar búsqueda exacta en PDF completo
+                if TEXTO_COMPLETO_PDF:
+                    articulo_completo = buscar_articulo_exacto(TEXTO_COMPLETO_PDF, num_articulo)
+                    if articulo_completo:
+                        articulos_reconstruidos[num_articulo] = {
+                            'texto': corregir_encoding(articulo_completo),
+                            'metodo': 'busqueda_exacta_pdf',
+                            'completo': True
+                        }
+                        print(f"  ✅ Art. {num_articulo} reconstruido desde PDF completo")
+                        continue
+                
+                # Si no se pudo reconstruir, usar lo que hay pero marcarlo como incompleto
+                articulos_reconstruidos[num_articulo] = {
+                    'texto': corregir_encoding(texto),
+                    'metodo': 'chunk_unico',
+                    'completo': False
+                }
+            else:
+                # Parece completo
+                articulos_reconstruidos[num_articulo] = {
+                    'texto': corregir_encoding(texto),
+                    'metodo': 'chunk_unico',
+                    'completo': True
+                }
+        
+        # CASO 2: Múltiples partes - intentar combinarlas
+        else:
+            print(f"  🔄 Art. {num_articulo} encontrado en {len(partes_ordenadas)} chunks - combinando...")
+            
+            # Combinar textos evitando duplicados
+            textos_combinados = []
+            texto_previo = ""
+            
+            for parte in partes_ordenadas:
+                texto_actual = parte['texto']
+                
+                # Evitar duplicar texto si hay overlap
+                if texto_previo:
+                    # Buscar overlap entre final de texto_previo y inicio de texto_actual
+                    overlap_length = min(200, len(texto_previo), len(texto_actual))
+                    for i in range(overlap_length, 0, -1):
+                        if texto_previo[-i:] == texto_actual[:i]:
+                            texto_actual = texto_actual[i:]
+                            break
+                
+                textos_combinados.append(texto_actual)
+                texto_previo = texto_actual
+            
+            texto_combinado = "".join(textos_combinados)
+            
+            # Verificar si la combinación parece completa
+            if es_articulo_incompleto(texto_combinado):
+                print(f"  ⚠️ Art. {num_articulo} combinado aún parece incompleto - buscando en PDF...")
+                
+                # Fallback a búsqueda exacta
+                if TEXTO_COMPLETO_PDF:
+                    articulo_completo = buscar_articulo_exacto(TEXTO_COMPLETO_PDF, num_articulo)
+                    if articulo_completo:
+                        articulos_reconstruidos[num_articulo] = {
+                            'texto': corregir_encoding(articulo_completo),
+                            'metodo': 'busqueda_exacta_pdf_fallback',
+                            'completo': True
+                        }
+                        print(f"  ✅ Art. {num_articulo} reconstruido desde PDF completo (fallback)")
+                        continue
+            
+            articulos_reconstruidos[num_articulo] = {
+                'texto': corregir_encoding(texto_combinado),
+                'metodo': f'combinacion_{len(partes_ordenadas)}_chunks',
+                'completo': not es_articulo_incompleto(texto_combinado)
+            }
+    
+    return articulos_reconstruidos
+
+
+def decidir_estrategia_busqueda(query: str, numero_articulo: str = None) -> dict:
+    """
+    Decide dinámicamente qué estrategia de búsqueda usar basándose en la consulta.
+    
+    Retorna:
+    {
+        'top_k': int,  # Cuántos resultados recuperar
+        'usar_reconstruccion': bool,  # Si aplicar post-procesamiento
+        'razon': str  # Explicación de la decisión
+    }
+    """
+    import re
+    
+    # ESTRATEGIA 1: Consulta de artículo específico simple
+    if numero_articulo and not re.search(r'\b(y|o|con|sin|además|también)\b', query, re.IGNORECASE):
+        return {
+            'top_k': TOP_K_MIN,  # 10 suficiente, irá a búsqueda exacta
+            'usar_reconstruccion': False,
+            'razon': 'Consulta de artículo específico - búsqueda exacta'
+        }
+    
+    # ESTRATEGIA 2: Consulta compleja con múltiples conceptos
+    palabras = query.split()
+    tiene_conectores = bool(re.search(r'\b(y|o|además|también|con|más)\b', query, re.IGNORECASE))
+    
+    if len(palabras) > 8 or tiene_conectores:
+        return {
+            'top_k': TOP_K_MAX,  # 30 para capturar más contexto
+            'usar_reconstruccion': True,
+            'razon': 'Consulta compleja multi-concepto - máxima cobertura + reconstrucción'
+        }
+    
+    # ESTRATEGIA 3: Consulta conceptual media (default)
+    return {
+        'top_k': TOP_K_RESULTS,  # 20 (balance)
+        'usar_reconstruccion': True,
+        'razon': 'Consulta conceptual estándar - cobertura media + reconstrucción'
+    }
+
+
 def generate_rag_response(query: str):
     """
     Sistema RAG híbrido con búsqueda exacta + vector search.
@@ -247,7 +450,13 @@ Responde ahora:"""
                         }
                     }
 
-        # --- PASO 3: ENRIQUECER QUERY (si no hubo match exacto) ---
+        # --- PASO 3: DECIDIR ESTRATEGIA INTELIGENTE ---
+        estrategia = decidir_estrategia_busqueda(query, numero_articulo)
+        print(f"🧠 Estrategia seleccionada: {estrategia['razon']}")
+        print(f"   - Top K: {estrategia['top_k']}")
+        print(f"   - Reconstrucción: {estrategia['usar_reconstruccion']}")
+        
+        # --- PASO 4: ENRIQUECER QUERY (si no hubo match exacto) ---
         if numero_articulo:
             query_enriquecida = (
                 f"Contenido literal del Código Penal español "
@@ -257,38 +466,43 @@ Responde ahora:"""
         else:
             query_enriquecida = query
 
-        # --- PASO 4: GENERAR EMBEDDING ---
+        # --- PASO 5: GENERAR EMBEDDING ---
         print("🔢 Generando embedding con Vertex AI...")
         embeddings = EMBEDDING_CLIENT.get_embeddings([query_enriquecida])
         query_vector = embeddings[0].values
         print(f"✅ Embedding generado: {len(query_vector)} dimensiones")
 
-        # --- PASO 5: BÚSQUEDA VECTORIAL EN PINECONE ---
-        print(f"🔍 Buscando en Pinecone (TOP_K={TOP_K_RESULTS})...")
+        # --- PASO 6: BÚSQUEDA VECTORIAL EN PINECONE (con Top K dinámico) ---
+        top_k_dinamico = estrategia['top_k']
+        print(f"🔍 Buscando en Pinecone (TOP_K={top_k_dinamico})...")
         results = PINECONE_INDEX.query(
             vector=query_vector,
-            top_k=TOP_K_RESULTS,
+            top_k=top_k_dinamico,
+            include_metadata=True
+        )
+        # --- PASO 6: BÚSQUEDA VECTORIAL EN PINECONE (con Top K dinámico) ---
+        top_k_dinamico = estrategia['top_k']
+        print(f"🔍 Buscando en Pinecone (TOP_K={top_k_dinamico})...")
+        results = PINECONE_INDEX.query(
+            vector=query_vector,
+            top_k=top_k_dinamico,
             include_metadata=True
         )
 
-        # --- PASO 6: FILTRADO ADAPTATIVO ---
+        # --- PASO 7: FILTRADO ADAPTATIVO ---
         umbral = 0.35 if numero_articulo else 0.45
         print(f"📊 Aplicando umbral adaptativo: {umbral}")
         
-        contexto_parts = []
+        chunks_relevantes = []
         for match in results['matches']:
             score = match.get('score', 0)
             print(f"  📊 Match con score: {score:.3f}")
             
             if score > umbral:
-                text = match.get('metadata', {}).get('text', '')
-                if text:
-                    # Corregir encoding del texto recuperado
-                    texto_corregido = corregir_encoding(text)
-                    contexto_parts.append(f"[Fragmento del Código Penal - Relevancia: {score:.2f}]\n{texto_corregido}")
-                    print(f"  ✓ Fragmento aceptado (score: {score:.3f})")
+                chunks_relevantes.append(match)
+                print(f"  ✓ Chunk aceptado (score: {score:.3f})")
 
-        if not contexto_parts:
+        if not chunks_relevantes:
             print("⚠️ No hay resultados relevantes después del filtrado")
             return {
                 "respuesta": "Lo siento, no encontré información relevante en el Código Penal sobre tu consulta. ¿Podrías reformularla o ser más específico?",
@@ -301,11 +515,76 @@ Responde ahora:"""
                 }
             }
 
-        contexto = "\n\n---\n\n".join(contexto_parts)
-        num_matches = len(contexto_parts)
-        print(f"📋 Contexto construido: {num_matches} fragmentos ({len(contexto)} caracteres)")
+        # --- PASO 8: POST-PROCESAMIENTO INTELIGENTE (si está habilitado) ---
+        if estrategia['usar_reconstruccion']:
+            print(f"\n🔧 Aplicando reconstrucción inteligente de artículos...")
+            
+            # Detectar artículos en los chunks
+            articulos_detectados = detectar_articulos_en_chunks(chunks_relevantes)
+            print(f"📋 Artículos detectados: {list(articulos_detectados.keys())}")
+            
+            # Reconstruir artículos completos
+            articulos_reconstruidos = reconstruir_articulos_completos(articulos_detectados, chunks_relevantes)
+            
+            # Construir contexto usando artículos reconstruidos + chunks originales
+            contexto_parts = []
+            articulos_ya_incluidos = set()
+            
+            # Primero, agregar artículos reconstruidos
+            for num_art, info in articulos_reconstruidos.items():
+                if info['completo'] or info['metodo'].startswith('busqueda_exacta'):
+                    contexto_parts.append(
+                        f"[Artículo {num_art} - Reconstruido ({info['metodo']})]"
+                        f"\n{info['texto']}"
+                    )
+                    articulos_ya_incluidos.add(num_art)
+                    print(f"  ✅ Art. {num_art} agregado como reconstruido ({info['metodo']})")
+            
+            # Luego, agregar chunks que no sean de artículos ya reconstruidos
+            for match in chunks_relevantes:
+                texto = match.get('metadata', {}).get('text', '')
+                score = match.get('score', 0)
+                
+                # Verificar si este chunk es de un artículo ya incluido
+                es_duplicado = False
+                for num_art in articulos_ya_incluidos:
+                    if f"Artículo {num_art}" in texto or f"Art. {num_art}" in texto:
+                        es_duplicado = True
+                        break
+                
+                if not es_duplicado:
+                    texto_corregido = corregir_encoding(texto)
+                    contexto_parts.append(
+                        f"[Fragmento del Código Penal - Relevancia: {score:.2f}]"
+                        f"\n{texto_corregido}"
+                    )
+            
+            contexto = "\n\n---\n\n".join(contexto_parts)
+            num_matches = len(contexto_parts)
+            articulos_completos = sum(1 for info in articulos_reconstruidos.values() if info['completo'])
+            articulos_incompletos = len(articulos_reconstruidos) - articulos_completos
+            
+            print(f"📋 Contexto final: {num_matches} fragmentos")
+            print(f"   - {articulos_completos} artículos completos reconstruidos")
+            print(f"   - {articulos_incompletos} artículos parciales")
+            print(f"   - Total: {len(contexto)} caracteres")
+        
+        else:
+            # Sin reconstrucción - método original
+            print(f"\n📋 Construcción de contexto sin reconstrucción...")
+            contexto_parts = []
+            for match in chunks_relevantes:
+                text = match.get('metadata', {}).get('text', '')
+                score = match.get('score', 0)
+                if text:
+                    texto_corregido = corregir_encoding(text)
+                    contexto_parts.append(f"[Fragmento del Código Penal - Relevancia: {score:.2f}]\n{texto_corregido}")
+            
+            contexto = "\n\n---\n\n".join(contexto_parts)
+            num_matches = len(contexto_parts)
+            print(f"📋 Contexto construido: {num_matches} fragmentos ({len(contexto)} caracteres)")
 
-        # --- PASO 7: GENERAR RESPUESTA CON GEMINI ---
+        # --- PASO 9: GENERAR RESPUESTA CON GEMINI ---
         prompt = f"""Actúa como un asistente jurídico especializado en Derecho Penal español. Tu conocimiento se basa exclusivamente en el texto oficial del Código Penal.
 
 CONSULTA DEL USUARIO:
