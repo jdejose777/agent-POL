@@ -1138,6 +1138,177 @@ async def handle_chat_request(request: ChatRequest):
     )
 
 
+# --- ENDPOINT: COMPARADOR DE ARTÍCULOS ⚖️ ---
+@app.get("/comparar")
+async def comparar_articulos(art1: str, art2: str):
+    """
+    🆕 MEJORA #5: Comparador de artículos
+    
+    Compara dos artículos del Código Penal generando una tabla comparativa detallada.
+    
+    Parámetros:
+    - art1: Número del primer artículo (ej: "138")
+    - art2: Número del segundo artículo (ej: "142")
+    
+    Retorna análisis comparativo con:
+    - Nombres de los delitos
+    - Penas aplicables
+    - Diferencias clave
+    - Similitudes
+    - Ejemplos de aplicación
+    """
+    print(f"\n{'='*60}")
+    print(f"⚖️  COMPARACIÓN DE ARTÍCULOS")
+    print(f"   Art. {art1} vs Art. {art2}")
+    print(f"{'='*60}")
+    
+    try:
+        # Buscar ambos artículos en el cache
+        texto_art1 = None
+        texto_art2 = None
+        
+        # Artículo 1
+        if art1 in ARTICULOS_CACHE:
+            texto_art1 = ARTICULOS_CACHE[art1]
+            if es_articulo_incompleto(texto_art1):
+                print(f"⚠️  Art. {art1} incompleto en cache - buscando versión completa...")
+                # Buscar en Pinecone para reconstruir
+                query_temp = f"Artículo {art1} completo"
+                resultado = generate_rag_response(query_temp, [])
+                texto_art1 = resultado["respuesta"]
+            else:
+                texto_art1 = corregir_encoding(texto_art1)
+        else:
+            print(f"⚠️  Art. {art1} no encontrado en cache - buscando...")
+            query_temp = f"Artículo {art1}"
+            resultado = generate_rag_response(query_temp, [])
+            texto_art1 = resultado["respuesta"]
+        
+        # Artículo 2
+        if art2 in ARTICULOS_CACHE:
+            texto_art2 = ARTICULOS_CACHE[art2]
+            if es_articulo_incompleto(texto_art2):
+                print(f"⚠️  Art. {art2} incompleto en cache - buscando versión completa...")
+                query_temp = f"Artículo {art2} completo"
+                resultado = generate_rag_response(query_temp, [])
+                texto_art2 = resultado["respuesta"]
+            else:
+                texto_art2 = corregir_encoding(texto_art2)
+        else:
+            print(f"⚠️  Art. {art2} no encontrado en cache - buscando...")
+            query_temp = f"Artículo {art2}"
+            resultado = generate_rag_response(query_temp, [])
+            texto_art2 = resultado["respuesta"]
+        
+        print(f"✅ Ambos artículos recuperados")
+        
+        # Generar comparación con Gemini
+        prompt = f"""Eres un experto en Derecho Penal español especializado en análisis comparativo de delitos.
+
+Se te han proporcionado dos artículos del Código Penal para comparar:
+
+**ARTÍCULO {art1}:**
+{texto_art1}
+
+**ARTÍCULO {art2}:**
+{texto_art2}
+
+**TU TAREA:**
+Genera un análisis comparativo COMPLETO y ESTRUCTURADO en formato Markdown con las siguientes secciones:
+
+## **Comparación: Artículo {art1} vs Artículo {art2}**
+
+### **📋 Resumen de cada artículo**
+
+**Artículo {art1}:**
+- Delito tipificado: [nombre del delito]
+- Bien jurídico protegido: [vida, integridad física, patrimonio, etc.]
+- Naturaleza: [doloso/imprudente/específico]
+
+**Artículo {art2}:**
+- Delito tipificado: [nombre del delito]
+- Bien jurídico protegido: [vida, integridad física, patrimonio, etc.]
+- Naturaleza: [doloso/imprudente/específico]
+
+### **⚖️ Tabla Comparativa**
+
+| Aspecto | Artículo {art1} | Artículo {art2} |
+|---------|----------------|----------------|
+| **Delito** | [nombre] | [nombre] |
+| **Pena mínima** | [X años/meses] | [X años/meses] |
+| **Pena máxima** | [X años/meses] | [X años/meses] |
+| **Elemento distintivo** | [característica clave] | [característica clave] |
+| **Tipo penal** | [básico/agravado/cualificado] | [básico/agravado/cualificado] |
+
+### **🔍 Diferencias clave**
+
+1. **[Diferencia principal]:** [Explicación detallada]
+2. **[Segunda diferencia]:** [Explicación detallada]
+3. **[Tercera diferencia]:** [Explicación detallada]
+
+### **🤝 Similitudes**
+
+- [Similitud 1 si existe]
+- [Similitud 2 si existe]
+- [Si no hay similitudes significativas, indicarlo]
+
+### **📚 Ejemplos prácticos**
+
+**Caso que aplicaría Art. {art1}:**
+[Ejemplo concreto de situación real]
+
+**Caso que aplicaría Art. {art2}:**
+[Ejemplo concreto de situación real]
+
+**Caso dudoso (diferenciación):**
+[Ejemplo donde se debe elegir entre uno u otro, explicando el criterio]
+
+### **⚡ Conclusión**
+
+**Cuándo aplicar Art. {art1}:** [Criterio claro]
+**Cuándo aplicar Art. {art2}:** [Criterio claro]
+**Criterio diferenciador clave:** [El factor determinante para elegir uno u otro]
+
+---
+
+**INSTRUCCIONES IMPORTANTES:**
+- Sé ESPECÍFICO con las penas (usa números exactos)
+- EXPLICA por qué son diferentes/similares
+- Usa lenguaje claro y accesible
+- Incluye ejemplos CONCRETOS y realistas
+- Si los artículos son muy diferentes (ej: uno sobre vida, otro sobre patrimonio), explica que no son comparables directamente pero analiza sus diferencias
+- Si son del mismo tipo de delito, profundiza en los matices que los distinguen
+
+GENERA LA COMPARACIÓN AHORA:"""
+
+        print(f"⚖️  Generando comparación con Gemini...")
+        response = LLM_CLIENT.generate_content(prompt)
+        
+        print(f"✅ Comparación generada exitosamente")
+        
+        return {
+            "comparacion": response.text,
+            "articulos_comparados": {
+                "articulo1": art1,
+                "articulo2": art2
+            },
+            "metadata": {
+                "modelo": MODEL_NAME,
+                "tipo_analisis": "comparativo",
+                "fuente": "Código Penal Español"
+            }
+        }
+        
+    except Exception as e:
+        print(f"❌ Error en comparación: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": f"Error al comparar artículos: {str(e)}",
+            "articulos_solicitados": [art1, art2]
+        }
+
+
 # --- 6. ENDPOINT DE SALUD ---
 @app.get("/health")
 async def health_check():
@@ -1160,12 +1331,20 @@ async def root():
     """Información básica de la API"""
     return {
         "message": "API RAG - Código Penal Español (Vertex AI)",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "provider": "Google Cloud Platform",
         "endpoints": {
-            "chat": "/chat (POST)",
-            "health": "/health (GET)",
-            "docs": "/docs (Documentación interactiva)"
+            "chat": "/chat (POST) - Consulta general con memoria conversacional",
+            "comparar": "/comparar?art1=X&art2=Y (GET) - Compara dos artículos",
+            "health": "/health (GET) - Estado del servicio",
+            "docs": "/docs - Documentación interactiva"
+        },
+        "features": {
+            "memoria_conversacional": "✅ Historial de conversación",
+            "cache_instantaneo": "✅ Búsqueda O(1) para artículos",
+            "rangos_articulos": "✅ Consulta de rangos (ej: '138 a 142')",
+            "comparador": "✅ Análisis comparativo de artículos",
+            "correccion_usuario": "✅ Validación bidireccional"
         },
         "models": {
             "generacion": MODEL_NAME,

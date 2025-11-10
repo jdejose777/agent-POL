@@ -12,8 +12,13 @@
     <div class="app-container">
         <!-- Header -->
         <header class="chat-header">
-            <h1>🤖 Chat RAG</h1>
-            <p>Pregúntame sobre tus documentos PDF</p>
+            <h1>🤖 Chat RAG - Código Penal</h1>
+            <p>Consulta artículos y compara delitos</p>
+            <div class="header-actions">
+                <button id="comparadorBtn" class="action-button">
+                    ⚖️ Comparar Artículos
+                </button>
+            </div>
         </header>
 
         <!-- Chat Container -->
@@ -54,6 +59,33 @@
             <span></span>
             <span></span>
             <span></span>
+        </div>
+    </div>
+
+    <!-- Modal Comparador -->
+    <div id="modalComparador" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚖️ Comparador de Artículos</h2>
+                <button class="modal-close" id="closeModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Introduce los números de los artículos que deseas comparar:</p>
+                <div class="comparador-inputs">
+                    <div class="input-group">
+                        <label for="articulo1">Artículo 1:</label>
+                        <input type="number" id="articulo1" placeholder="138" min="1" max="999">
+                    </div>
+                    <span class="vs-text">VS</span>
+                    <div class="input-group">
+                        <label for="articulo2">Artículo 2:</label>
+                        <input type="number" id="articulo2" placeholder="142" min="1" max="999">
+                    </div>
+                </div>
+                <button id="compararBtn" class="compare-button">
+                    🔍 Comparar
+                </button>
+            </div>
         </div>
     </div>
 
