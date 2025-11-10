@@ -456,6 +456,8 @@ def generate_rag_response(query: str, historial: list = None):
 
         # --- PASO 0.5: ENRIQUECER CONSULTA CON CONTEXTO CONVERSACIONAL ---
         query_enriquecida = query
+        nota_correccion = ""  # Variable para almacenar instrucciones de corrección
+        
         if historial and len(historial) > 0:
             print(f"🔍 DEBUG: Analizando si es consulta de seguimiento...")
             
@@ -465,6 +467,11 @@ def generate_rag_response(query: str, historial: list = None):
             # Palabras que indican nuevo caso (resetear contexto)
             palabras_nuevo_caso = ['nuevo caso', 'otra consulta', 'ahora sobre', 'pregunta nueva', 'cambio de tema']
             
+            # Palabras que indican corrección/refinamiento
+            palabras_correccion = ['no', 'mejor', 'prefiero', 'creo que', 'en realidad', 'debería ser', 
+                                  'en vez de', 'en lugar de', 'más bien', 'corrección', 'correción',
+                                  'no es', 'sería mejor', 'más apropiado', 'en su lugar']
+            
             query_lower = query.lower().strip()
             print(f"   Query lowercase: '{query_lower}'")
             print(f"   Número de palabras: {len(query.split())}")
@@ -473,7 +480,91 @@ def generate_rag_response(query: str, historial: list = None):
             es_nuevo_caso = any(palabra in query_lower for palabra in palabras_nuevo_caso)
             print(f"   Es nuevo caso: {es_nuevo_caso}")
             
-            if es_nuevo_caso:
+            # Detectar si menciona artículo
+            menciona_articulo = bool(re.search(r'\b(?:art[íi]culo|art\.?)\s*\d+', query, re.IGNORECASE))
+            print(f"   Menciona artículo: {menciona_articulo}")
+            
+            # PRIORIDAD 1: Detectar si es corrección/refinamiento
+            es_correccion = any(palabra in query_lower for palabra in palabras_correccion) and menciona_articulo
+            print(f"   Es corrección: {es_correccion}")
+            
+            if es_correccion:
+                print(f"🔄 CORRECCIÓN DETECTADA - Usuario propone artículo alternativo")
+                
+                # Extraer el artículo propuesto
+                match_articulo_propuesto = re.search(r'art[íi]culo\s*(\d+(?:\s+(?:bis|ter|quater))?)', query, re.IGNORECASE)
+                if match_articulo_propuesto:
+                    articulo_propuesto = match_articulo_propuesto.group(1).strip()
+                    print(f"   📌 Artículo propuesto por usuario: {articulo_propuesto}")
+                    
+                    # Obtener contexto de qué artículos se mencionaron antes
+                    articulos_previos = []
+                    for msg in reversed(historial):
+                        if msg.role == "assistant":
+                            # Buscar artículos mencionados en la respuesta anterior
+                            matches_previos = re.finditer(r'Art[íi]culo\s*(\d+)', msg.content, re.IGNORECASE)
+                            articulos_previos = [m.group(1) for m in matches_previos]
+                            if articulos_previos:
+                                print(f"   📋 Artículos en respuesta anterior: {articulos_previos[:3]}")
+                                break
+                    
+                    # Crear nota de corrección para Gemini
+                    nota_correccion = f"""
+**🔄 CORRECCIÓN/REFINAMIENTO DEL USUARIO:**
+El usuario está sugiriendo que el **artículo {articulo_propuesto}** sería más apropiado.
+
+**⚠️ IMPORTANTE - NO ACEPTES AUTOMÁTICAMENTE:**
+El usuario puede estar equivocado. Debes EVALUAR primero si su sugerencia es correcta.
+
+**PASO 1 - EVALUAR OBLIGATORIAMENTE:**
+Antes de responder, analiza críticamente:
+
+1. **Hechos del caso original:** {historial[0].content if historial else "N/A"}
+2. **Artículos previamente identificados como correctos:** {articulos_previos[:3] if articulos_previos else "N/A"}
+3. **Artículo propuesto por el usuario:** {articulo_propuesto}
+
+**PREGÚNTATE:**
+- ¿El artículo {articulo_propuesto} realmente encaja con los HECHOS descritos en el caso?
+- ¿Los requisitos legales del artículo {articulo_propuesto} se cumplen en este caso?
+- ¿O el usuario está confundiendo conceptos? (ejemplo: doloso vs imprudente, fuerza vs intimidación)
+
+**PASO 2 - RESPONDER SEGÚN TU EVALUACIÓN:**
+
+**OPCIÓN A - SI EL ARTÍCULO {articulo_propuesto} ES CORRECTO:**
+✅ El usuario tiene razón → Responde:
+"Tienes razón, el artículo {articulo_propuesto} [nombre del delito] es el más apropiado porque [breve razón]."
+Luego proporciona ficha legal completa del artículo {articulo_propuesto}.
+
+**OPCIÓN B - SI EL ARTÍCULO {articulo_propuesto} NO ES CORRECTO:**
+❌ El usuario se equivoca → Responde:
+"Entiendo que sugieres el artículo {articulo_propuesto} ([nombre del delito que propone]), sin embargo, este artículo no sería el más apropiado para este caso porque [razón específica: qué requisito NO se cumple].
+
+Según los hechos descritos [mencionar hechos relevantes], el artículo correcto sería el **artículo [X]** ([nombre del delito correcto]) porque [razón específica: qué requisito SÍ se cumple].
+
+A continuación te muestro ambos artículos para que puedas comparar:
+
+[Muestra AMBOS artículos con sus diferencias clave resaltadas]"
+
+**EJEMPLOS DE CORRECCIÓN:**
+
+✅ **Ejemplo cuando usuario ACIERTA:**
+Usuario sugiere: art. 237 en caso de robo con fuerza
+Respuesta: "Tienes razón, el artículo 237 sobre robo con fuerza en las cosas es el apropiado porque los hechos indican escalamiento..."
+
+❌ **Ejemplo cuando usuario SE EQUIVOCA:**
+Usuario sugiere: art. 138 (homicidio doloso) en caso de atropello imprudente
+Respuesta: "Entiendo que sugieres el artículo 138 (homicidio doloso), sin embargo, este artículo requiere que la muerte se cause con **intención deliberada**, lo cual no se cumple en un atropello por imprudencia.
+
+Según los hechos descritos (atropello por imprudencia grave), el artículo correcto sería el **artículo 142** (homicidio imprudente) porque..."
+
+**NO ASUMAS QUE EL USUARIO SIEMPRE TIENE RAZÓN. EVALÚA CRÍTICAMENTE.**
+"""
+                    
+                    # No enriquecer con contexto previo en correcciones - el usuario ya sabe qué quiere
+                    query_enriquecida = query
+                    print(f"   ✅ Corrección procesada - enfocándose en artículo {articulo_propuesto}")
+                
+            elif es_nuevo_caso:
                 print(f"🆕 Nuevo caso detectado - no se enriquece con historial")
             else:
                 # Criterios para considerar seguimiento:
@@ -538,12 +629,14 @@ def generate_rag_response(query: str, historial: list = None):
         
         # --- PASO 2: BÚSQUEDA EXACTA INSTANTÁNEA (si hay número de artículo) ---
         # ⚡ MEJORA #1: Usar cache O(1) en lugar de buscar en PDF con regex
+        # EXCEPCIÓN: Si es una corrección, NO usar cache directo - pasar por Gemini con contexto
         if numero_articulo:
             print(f"🔑 Buscando '{numero_articulo}' en cache...")
             print(f"📋 Cache tiene {len(ARTICULOS_CACHE)} artículos")
             print(f"🔍 Artículo en cache: {numero_articulo in ARTICULOS_CACHE}")
             
-        if numero_articulo and numero_articulo in ARTICULOS_CACHE:
+        # Solo usar cache directo si NO es corrección
+        if numero_articulo and numero_articulo in ARTICULOS_CACHE and not nota_correccion:
             print(f"⚡ Búsqueda instantánea en cache para artículo {numero_articulo}...")
             texto_exacto = ARTICULOS_CACHE[numero_articulo]
             
@@ -738,7 +831,16 @@ Responde ahora:"""
         
         # Ajustar límites de concisión según si es consulta de seguimiento
         es_seguimiento = query_enriquecida != query  # Si se enriqueció, es seguimiento
-        if es_seguimiento:
+        
+        # Si hay nota de corrección, usarla (tiene prioridad sobre seguimiento)
+        if nota_correccion:
+            nota_contextual = nota_correccion
+            # En correcciones, mantener límites normales (el usuario sabe qué quiere)
+            limite_articulos = "1-3 artículos"
+            limite_max_articulos = "5 artículos"
+            limite_penas = "2-5 penas"
+            limite_max_penas = "8 penas"
+        elif es_seguimiento:
             limite_articulos = "4-8 artículos"
             limite_max_articulos = "12 artículos"
             limite_penas = "4-12 penas"
@@ -764,16 +866,17 @@ Debes analizar y responder sobre TODOS los delitos/aspectos mencionados en la "C
 
 Ejemplo: Si la consulta completa es "robo de coche y además atropello mortal", debes explicar AMBOS delitos (robo + atropello) con similar nivel de detalle, artículos y penas.
 """
+            nota_contextual = nota_seguimiento
         else:
             limite_articulos = "3-5 artículos"
             limite_max_articulos = "6 artículos"
             limite_penas = "3-6 penas"
             limite_max_penas = "6 penas"
-            nota_seguimiento = ""
+            nota_contextual = ""
         
         prompt = f"""Actúa como un asistente jurídico especializado en Derecho Penal español. Tu conocimiento se basa exclusivamente en el texto oficial del Código Penal.
 
-{nota_seguimiento}
+{nota_contextual}
 
 CONSULTA DEL USUARIO:
 {query_enriquecida}
