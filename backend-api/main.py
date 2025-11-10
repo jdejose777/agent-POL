@@ -68,16 +68,47 @@ try:
             
         # E. Construir cache de artículos para búsqueda ultra-rápida (⚡ Mejora #1)
         print("🔄 Construyendo cache de artículos...")
-        # Patrón para extraer artículos completos con sus números
-        patron_articulos = r'(Artículo\s+(\d+(?:\s+bis|\s+ter|\s+quater)?)\..*?)(?=\n\s*Artículo\s+\d+|\Z)'
-        matches = re.finditer(patron_articulos, TEXTO_COMPLETO_PDF, re.DOTALL | re.IGNORECASE)
         
-        for match in matches:
-            numero_articulo = match.group(2).strip()
-            texto_articulo = match.group(1).strip()
+        # Estrategia robusta: encontrar todos los inicios de artículos
+        # Patrón que acepta múltiples variantes: "Artículo", "Articulo", "ARTÍCULO", etc.
+        patron_inicio = r'Art[ií\xed]culo\s+(\d+(?:\s+(?:bis|ter|quater))?)\s*\.?'
+        matches = list(re.finditer(patron_inicio, TEXTO_COMPLETO_PDF, re.IGNORECASE))
+        
+        print(f"   📋 Detectados {len(matches)} inicios de artículos en el PDF")
+        
+        for i, match in enumerate(matches):
+            numero_articulo = match.group(1).strip()
+            inicio = match.start()
+            
+            # Encontrar el final: siguiente artículo o fin del texto
+            if i < len(matches) - 1:
+                fin = matches[i + 1].start()
+            else:
+                fin = len(TEXTO_COMPLETO_PDF)
+            
+            # Extraer texto completo del artículo
+            texto_articulo = TEXTO_COMPLETO_PDF[inicio:fin].strip()
+            
+            # Limpiar saltos de línea excesivos pero mantener estructura
+            texto_articulo = re.sub(r'\n{3,}', '\n\n', texto_articulo)
+            
             ARTICULOS_CACHE[numero_articulo] = texto_articulo
         
         print(f"✅ Cache construido: {len(ARTICULOS_CACHE)} artículos indexados para búsqueda instantánea")
+        
+        if len(ARTICULOS_CACHE) < 500:
+            print(f"⚠️  ADVERTENCIA: Solo se cachearon {len(ARTICULOS_CACHE)} artículos (esperado ~600+)")
+            print(f"   Primeros 10 artículos cacheados: {list(ARTICULOS_CACHE.keys())[:10]}")
+            # Mostrar muestra del PDF para debug
+            muestra = TEXTO_COMPLETO_PDF[10000:10500]
+            print(f"   Muestra del PDF (chars 10000-10500):")
+            print(f"   {repr(muestra[:200])}")
+        else:
+            print(f"✅ Calidad del cache verificada")
+            # Verificar algunos artículos clave
+            articulos_prueba = ['138', '237', '244', '142']
+            encontrados = [art for art in articulos_prueba if art in ARTICULOS_CACHE]
+            print(f"   Artículos de prueba ({len(encontrados)}/4): {encontrados}")
         
     except Exception as e:
         print(f"⚠️ No se pudo cargar PDF completo: {e} (búsqueda exacta deshabilitada)")
@@ -270,7 +301,7 @@ def reconstruir_articulos_completos(articulos_detectados: dict, chunks_originale
     """
     Para artículos que aparecen partidos, intenta reconstruirlos usando:
     1. Combinación de múltiples chunks si están disponibles
-    2. Búsqueda exacta en PDF completo si es necesario
+    2. Búsqueda instantánea en ARTICULOS_CACHE (O(1))
     
     Retorna: {numero_articulo: texto_completo_reconstruido}
     """
@@ -286,19 +317,18 @@ def reconstruir_articulos_completos(articulos_detectados: dict, chunks_originale
             
             # Verificar si parece incompleto
             if es_articulo_incompleto(texto):
-                print(f"  ⚠️ Art. {num_articulo} parece incompleto (1 chunk) - buscando en PDF completo...")
+                print(f"  ⚠️ Art. {num_articulo} parece incompleto (1 chunk) - buscando en cache...")
                 
-                # Intentar búsqueda exacta en PDF completo
-                if TEXTO_COMPLETO_PDF:
-                    articulo_completo = buscar_articulo_exacto(TEXTO_COMPLETO_PDF, num_articulo)
-                    if articulo_completo:
-                        articulos_reconstruidos[num_articulo] = {
-                            'texto': corregir_encoding(articulo_completo),
-                            'metodo': 'busqueda_exacta_pdf',
-                            'completo': True
-                        }
-                        print(f"  ✅ Art. {num_articulo} reconstruido desde PDF completo")
-                        continue
+                # ⚡ MEJORA #1: Búsqueda instantánea en cache O(1)
+                if num_articulo in ARTICULOS_CACHE:
+                    articulo_completo = ARTICULOS_CACHE[num_articulo]
+                    articulos_reconstruidos[num_articulo] = {
+                        'texto': corregir_encoding(articulo_completo),
+                        'metodo': 'cache_instantaneo',
+                        'completo': True
+                    }
+                    print(f"  ✅ Art. {num_articulo} reconstruido desde cache (O(1))")
+                    continue
                 
                 # Si no se pudo reconstruir, usar lo que hay pero marcarlo como incompleto
                 articulos_reconstruidos[num_articulo] = {
@@ -341,19 +371,18 @@ def reconstruir_articulos_completos(articulos_detectados: dict, chunks_originale
             
             # Verificar si la combinación parece completa
             if es_articulo_incompleto(texto_combinado):
-                print(f"  ⚠️ Art. {num_articulo} combinado aún parece incompleto - buscando en PDF...")
+                print(f"  ⚠️ Art. {num_articulo} combinado aún parece incompleto - buscando en cache...")
                 
-                # Fallback a búsqueda exacta
-                if TEXTO_COMPLETO_PDF:
-                    articulo_completo = buscar_articulo_exacto(TEXTO_COMPLETO_PDF, num_articulo)
-                    if articulo_completo:
-                        articulos_reconstruidos[num_articulo] = {
-                            'texto': corregir_encoding(articulo_completo),
-                            'metodo': 'busqueda_exacta_pdf_fallback',
-                            'completo': True
-                        }
-                        print(f"  ✅ Art. {num_articulo} reconstruido desde PDF completo (fallback)")
-                        continue
+                # ⚡ MEJORA #1: Fallback a búsqueda instantánea en cache
+                if num_articulo in ARTICULOS_CACHE:
+                    articulo_completo = ARTICULOS_CACHE[num_articulo]
+                    articulos_reconstruidos[num_articulo] = {
+                        'texto': corregir_encoding(articulo_completo),
+                        'metodo': 'cache_instantaneo_fallback',
+                        'completo': True
+                    }
+                    print(f"  ✅ Art. {num_articulo} reconstruido desde cache (O(1) fallback)")
+                    continue
             
             articulos_reconstruidos[num_articulo] = {
                 'texto': corregir_encoding(texto_combinado),
@@ -416,6 +445,8 @@ def generate_rag_response(query: str, historial: list = None):
     4. Si no encuentra, usa RAG con embeddings
     5. Corrige encoding en todos los resultados
     """
+    import re  # Importar al principio para usar en todo el scope
+    
     try:
         print(f"\n{'='*80}")
         print(f"📨 CONSULTA: {query}")
@@ -426,22 +457,69 @@ def generate_rag_response(query: str, historial: list = None):
         # --- PASO 0.5: ENRIQUECER CONSULTA CON CONTEXTO CONVERSACIONAL ---
         query_enriquecida = query
         if historial and len(historial) > 0:
-            # Si la consulta es muy corta y parece ser de seguimiento, agregar contexto
-            palabras_seguimiento = ['y', 'también', 'además', 'qué más', 'otra', 'ese', 'esa', 'cuál', 'pena']
-            es_seguimiento = any(palabra in query.lower() for palabra in palabras_seguimiento) and len(query.split()) < 5
+            print(f"🔍 DEBUG: Analizando si es consulta de seguimiento...")
             
-            if es_seguimiento:
-                # Tomar último mensaje del usuario y última respuesta
-                contexto_previo = ""
-                for msg in historial[-2:]:  # Últimos 2 mensajes
-                    if msg.role == "user":
-                        contexto_previo += f" {msg.content}"
+            # Detectar si es una consulta de seguimiento
+            palabras_seguimiento = ['y', 'también', 'además', 'qué más', 'otra', 'ese', 'esa', 'esos', 'esas', 'cuál', 'pena', 'entonces', 'pero']
+            
+            # Palabras que indican nuevo caso (resetear contexto)
+            palabras_nuevo_caso = ['nuevo caso', 'otra consulta', 'ahora sobre', 'pregunta nueva', 'cambio de tema']
+            
+            query_lower = query.lower().strip()
+            print(f"   Query lowercase: '{query_lower}'")
+            print(f"   Número de palabras: {len(query.split())}")
+            
+            # Si menciona explícitamente nuevo caso, no enriquecer
+            es_nuevo_caso = any(palabra in query_lower for palabra in palabras_nuevo_caso)
+            print(f"   Es nuevo caso: {es_nuevo_caso}")
+            
+            if es_nuevo_caso:
+                print(f"🆕 Nuevo caso detectado - no se enriquece con historial")
+            else:
+                # Criterios para considerar seguimiento:
+                # 1. Empieza con palabra de seguimiento (muy común)
+                # 2. Es una consulta corta (< 10 palabras) con palabra de seguimiento
+                # 3. No menciona explícitamente un artículo nuevo
                 
-                query_enriquecida = f"{contexto_previo.strip()} {query}"
-                print(f"🔗 Consulta enriquecida con contexto: {query_enriquecida[:100]}...")
+                empieza_con_seguimiento = any(query_lower.startswith(palabra) for palabra in palabras_seguimiento)
+                contiene_seguimiento = any(palabra in query_lower for palabra in palabras_seguimiento)
+                es_corta = len(query.split()) < 10
+                
+                print(f"   Empieza con seguimiento: {empieza_con_seguimiento}")
+                print(f"   Contiene seguimiento: {contiene_seguimiento}")
+                print(f"   Es corta (<10 palabras): {es_corta}")
+                
+                # No es seguimiento si menciona explícitamente un artículo
+                menciona_articulo = bool(re.search(r'\b(?:art[íi]culo|art\.?)\s*\d+', query, re.IGNORECASE))
+                print(f"   Menciona artículo: {menciona_articulo}")
+                
+                es_seguimiento = (empieza_con_seguimiento or (contiene_seguimiento and es_corta)) and not menciona_articulo
+                print(f"   ✅ RESULTADO: Es seguimiento = {es_seguimiento}")
+                
+                if es_seguimiento:
+                    # Tomar el último contexto del usuario para entender el tema
+                    contexto_previo = ""
+                    
+                    print(f"   🔍 Buscando contexto previo en historial ({len(historial)} mensajes)...")
+                    # Buscar en historial la última pregunta del usuario (no la respuesta del bot)
+                    for i, msg in enumerate(reversed(historial)):
+                        print(f"      Mensaje {i}: role='{msg.role}', content='{msg.content[:50]}...'")
+                        if msg.role == "user":
+                            contexto_previo = msg.content
+                            print(f"      ✓ Contexto encontrado!")
+                            break
+                    
+                    if contexto_previo:
+                        query_enriquecida = f"{contexto_previo} {query}"
+                        print(f"🔗 Consulta detectada como seguimiento")
+                        print(f"📝 Contexto previo: {contexto_previo[:80]}...")
+                        print(f"🔍 Consulta enriquecida: {query_enriquecida[:150]}...")
+                    else:
+                        print(f"⚠️ Seguimiento detectado pero sin contexto previo")
+                else:
+                    print(f"   ℹ️  No se detectó como seguimiento - usando consulta original")
 
         # --- PASO 1: DETECTAR NÚMERO DE ARTÍCULO ---
-        import re
         articulo_pattern = r'\b(?:art[íi]culo|art\.?)\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\b'
         solo_numero_pattern = r'^\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\s*$'
         
@@ -455,20 +533,22 @@ def generate_rag_response(query: str, historial: list = None):
         elif match_numero:
             numero_articulo = match_numero.group(1)
             print(f"🎯 Artículo detectado (solo número): {numero_articulo}")
+        else:
+            print(f"ℹ️  No se detectó número de artículo en la query")
         
-        # DEBUG: Verificar estado del PDF
+        # --- PASO 2: BÚSQUEDA EXACTA INSTANTÁNEA (si hay número de artículo) ---
+        # ⚡ MEJORA #1: Usar cache O(1) en lugar de buscar en PDF con regex
         if numero_articulo:
-            print(f"📄 TEXTO_COMPLETO_PDF disponible: {TEXTO_COMPLETO_PDF is not None}")
-            if TEXTO_COMPLETO_PDF:
-                print(f"📄 Tamaño del PDF: {len(TEXTO_COMPLETO_PDF)} caracteres")
-        
-        # --- PASO 2: BÚSQUEDA EXACTA (si hay número de artículo y PDF cargado) ---
-        if numero_articulo and TEXTO_COMPLETO_PDF:
-            print(f"🔍 Intentando búsqueda exacta para artículo {numero_articulo}...")
-            texto_exacto = buscar_articulo_exacto(TEXTO_COMPLETO_PDF, numero_articulo)
+            print(f"🔑 Buscando '{numero_articulo}' en cache...")
+            print(f"📋 Cache tiene {len(ARTICULOS_CACHE)} artículos")
+            print(f"🔍 Artículo en cache: {numero_articulo in ARTICULOS_CACHE}")
+            
+        if numero_articulo and numero_articulo in ARTICULOS_CACHE:
+            print(f"⚡ Búsqueda instantánea en cache para artículo {numero_articulo}...")
+            texto_exacto = ARTICULOS_CACHE[numero_articulo]
             
             if texto_exacto:
-                print(f"✅ ¡Artículo {numero_articulo} encontrado con búsqueda exacta!")
+                print(f"✅ ¡Artículo {numero_articulo} encontrado en cache (O(1))!")
                 texto_corregido = corregir_encoding(texto_exacto)
                 
                 # Responder directamente sin pasar por Gemini si es texto razonable
@@ -480,9 +560,9 @@ def generate_rag_response(query: str, historial: list = None):
                         "metadata": {
                             "num_fragmentos": 1,
                             "tiene_contexto": True,
-                            "modelo": "Búsqueda exacta (sin LLM)",
+                            "modelo": "Cache instantáneo (sin LLM)",
                             "embedding_model": "N/A",
-                            "metodo": "exact_match"
+                            "metodo": "cache_O(1)"
                         }
                     }
                 else:
@@ -524,17 +604,21 @@ Responde ahora:"""
         
         # --- PASO 4: ENRIQUECER QUERY (si no hubo match exacto) ---
         if numero_articulo:
-            query_enriquecida = (
+            query_enriquecida_embedding = (
                 f"Contenido literal del Código Penal español "
                 f"Artículo {numero_articulo} delito pena castigo texto completo"
             )
-            print(f"🔄 Query enriquecida: {query_enriquecida}")
+            print(f"🔄 Query para embedding: {query_enriquecida_embedding}")
         else:
-            query_enriquecida = query
+            # IMPORTANTE: Mantener la query enriquecida con contexto conversacional
+            # que se creó en PASO 0.5 (no sobrescribir)
+            query_enriquecida_embedding = query_enriquecida
+            if query_enriquecida != query:
+                print(f"🔄 Usando query enriquecida con contexto conversacional")
 
         # --- PASO 5: GENERAR EMBEDDING ---
         print("🔢 Generando embedding con Vertex AI...")
-        embeddings = EMBEDDING_CLIENT.get_embeddings([query_enriquecida])
+        embeddings = EMBEDDING_CLIENT.get_embeddings([query_enriquecida_embedding])
         query_vector = embeddings[0].values
         print(f"✅ Embedding generado: {len(query_vector)} dimensiones")
 
@@ -651,10 +735,48 @@ Responde ahora:"""
             print(f"📋 Contexto construido: {num_matches} fragmentos ({len(contexto)} caracteres)")
 
         # --- PASO 9: GENERAR RESPUESTA CON GEMINI ---
+        
+        # Ajustar límites de concisión según si es consulta de seguimiento
+        es_seguimiento = query_enriquecida != query  # Si se enriqueció, es seguimiento
+        if es_seguimiento:
+            limite_articulos = "4-8 artículos"
+            limite_max_articulos = "12 artículos"
+            limite_penas = "4-12 penas"
+            limite_max_penas = "12 penas"
+            
+            # Extraer la última consulta del usuario del historial
+            ultima_consulta_usuario = ""
+            for msg in reversed(historial):
+                if msg.role == "user":
+                    ultima_consulta_usuario = msg.content
+                    break
+            
+            nota_seguimiento = f"""
+**⚠️ CONTEXTO CONVERSACIONAL - CONSULTA DE SEGUIMIENTO:**
+El usuario está continuando una conversación previa. Esta consulta hace referencia a múltiples aspectos:
+
+- **Consulta anterior:** "{ultima_consulta_usuario}"
+- **Consulta actual:** "{query}"
+- **CONSULTA COMPLETA INTERPRETADA:** "{query_enriquecida}"
+
+**INSTRUCCIÓN CRÍTICA:** 
+Debes analizar y responder sobre TODOS los delitos/aspectos mencionados en la "CONSULTA COMPLETA INTERPRETADA" con IGUAL importancia y detalle. No priorices solo el último tema mencionado - dedica espacio y artículos similares a CADA aspecto del caso.
+
+Ejemplo: Si la consulta completa es "robo de coche y además atropello mortal", debes explicar AMBOS delitos (robo + atropello) con similar nivel de detalle, artículos y penas.
+"""
+        else:
+            limite_articulos = "3-5 artículos"
+            limite_max_articulos = "6 artículos"
+            limite_penas = "3-6 penas"
+            limite_max_penas = "6 penas"
+            nota_seguimiento = ""
+        
         prompt = f"""Actúa como un asistente jurídico especializado en Derecho Penal español. Tu conocimiento se basa exclusivamente en el texto oficial del Código Penal.
 
+{nota_seguimiento}
+
 CONSULTA DEL USUARIO:
-{query}
+{query_enriquecida}
 
 CONTEXTO RECUPERADO ({num_matches} fragmentos del Código Penal):
 {contexto}
@@ -680,8 +802,8 @@ PROTOCOLO DE RESPUESTA:
 - **Art. [número]** – [nombre o resumen breve del tipo penal]
 
 **LÍMITES DE CONCISIÓN:**
-- **Recomendado: 3-5 artículos** (los más directamente relevantes)
-- **Máximo: 6 artículos** (solo si el caso es muy complejo con múltiples delitos en concurso)
+- **Recomendado: {limite_articulos}** (los más directamente relevantes)
+- **Máximo: {limite_max_articulos}** (solo si el caso es muy complejo con múltiples delitos en concurso)
 - Prioriza CALIDAD sobre CANTIDAD: mejor 3 artículos bien explicados que 6 superficiales
 
 ### **Penas aplicables:**
@@ -690,8 +812,8 @@ PROTOCOLO DE RESPUESTA:
 - **Agravantes/Atenuantes:** [factores que modifican la pena si aplican]
 
 **LÍMITES DE CONCISIÓN:**
-- **Recomendado: 3-6 penas** (las principales para cada artículo relevante)
-- **Máximo: 6 penas** (si hay varios delitos acumulables o múltiples agravantes)
+- **Recomendado: {limite_penas}** (las principales para cada artículo relevante)
+- **Máximo: {limite_max_penas}** (si hay varios delitos acumulables o múltiples agravantes)
 - Si hay muchos artículos, agrupa las penas similares en lugar de listarlas todas
 
 **IMPORTANTE:** Usa SIEMPRE números para expresar las penas (ej: "de 1 a 6 meses", "de 2 a 5 años"), NUNCA escribas los números en letra (NO "de uno a seis meses").
