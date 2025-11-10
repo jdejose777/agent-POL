@@ -665,22 +665,36 @@ Según los hechos descritos (atropello por imprudencia grave), el artículo corr
             inicio, fin = rango_articulos
             articulos_encontrados = []
             articulos_faltantes = []
+            articulos_incompletos = []
             
             print(f"📚 Buscando rango de artículos {inicio} a {fin} en cache...")
             
             for num in range(inicio, fin + 1):
                 num_str = str(num)
                 if num_str in ARTICULOS_CACHE:
-                    articulos_encontrados.append((num_str, ARTICULOS_CACHE[num_str]))
+                    texto = ARTICULOS_CACHE[num_str]
+                    
+                    # 🔍 Verificar si el artículo está completo
+                    if es_articulo_incompleto(texto):
+                        print(f"   ⚠️ Art. {num_str} está incompleto en cache")
+                        articulos_incompletos.append(num_str)
+                    else:
+                        articulos_encontrados.append((num_str, texto))
                 else:
                     articulos_faltantes.append(num_str)
             
-            print(f"✅ Encontrados: {len(articulos_encontrados)}/{fin - inicio + 1} artículos")
+            print(f"✅ Completos: {len(articulos_encontrados)}/{fin - inicio + 1} artículos")
             if articulos_faltantes:
                 print(f"⚠️ No encontrados: {articulos_faltantes}")
+            if articulos_incompletos:
+                print(f"⚠️ Incompletos (pasarán por RAG): {articulos_incompletos}")
             
-            if articulos_encontrados:
-                # Construir respuesta con todos los artículos del rango
+            # Si hay artículos incompletos, NO usar cache directo - pasar por RAG
+            if articulos_incompletos:
+                print(f"🔄 Rango contiene {len(articulos_incompletos)} artículo(s) incompleto(s) - usando RAG para reconstruir")
+                # NO retornar aquí - dejar que caiga en el flujo de RAG normal
+            elif articulos_encontrados:
+                # Solo si TODOS los artículos están completos, responder desde cache
                 respuesta_rango = f"**Artículos {inicio} a {fin} del Código Penal**\n\n"
                 
                 for num, texto in articulos_encontrados:
@@ -717,25 +731,31 @@ Según los hechos descritos (atropello por imprudencia grave), el artículo corr
             
             if texto_exacto:
                 print(f"✅ ¡Artículo {numero_articulo} encontrado en cache (O(1))!")
-                texto_corregido = corregir_encoding(texto_exacto)
                 
-                # Responder directamente sin pasar por Gemini si es texto razonable
-                # Aumentado a 4000 caracteres (la mayoría de artículos caben)
-                if len(texto_corregido) < 4000:
-                    respuesta_final = f"**Artículo {numero_articulo}**\n\n{texto_corregido}"
-                    return {
-                        "respuesta": respuesta_final,
-                        "metadata": {
-                            "num_fragmentos": 1,
-                            "tiene_contexto": True,
-                            "modelo": "Cache instantáneo (sin LLM)",
-                            "embedding_model": "N/A",
-                            "metodo": "cache_O(1)"
-                        }
-                    }
+                # 🔍 Verificar si el artículo en cache está completo
+                if es_articulo_incompleto(texto_exacto):
+                    print(f"⚠️  Artículo {numero_articulo} en cache parece INCOMPLETO - pasando por RAG para reconstrucción...")
+                    # NO retornar aquí - dejar que caiga en el flujo de RAG normal
                 else:
-                    # Si es muy largo (>4000 chars), pasar por Gemini para formatear mejor
-                    prompt = f"""Eres un asistente legal especializado en el Código Penal español.
+                    texto_corregido = corregir_encoding(texto_exacto)
+                    
+                    # Responder directamente sin pasar por Gemini si es texto razonable
+                    # Aumentado a 4000 caracteres (la mayoría de artículos caben)
+                    if len(texto_corregido) < 4000:
+                        respuesta_final = f"**Artículo {numero_articulo}**\n\n{texto_corregido}"
+                        return {
+                            "respuesta": respuesta_final,
+                            "metadata": {
+                                "num_fragmentos": 1,
+                                "tiene_contexto": True,
+                                "modelo": "Cache instantáneo (sin LLM)",
+                                "embedding_model": "N/A",
+                                "metodo": "cache_O(1)"
+                            }
+                        }
+                    else:
+                        # Si es muy largo (>4000 chars), pasar por Gemini para formatear mejor
+                        prompt = f"""Eres un asistente legal especializado en el Código Penal español.
 
 El usuario preguntó: "{query}"
 
@@ -752,17 +772,17 @@ INSTRUCCIONES:
 
 Responde ahora:"""
 
-                    response = LLM_CLIENT.generate_content(prompt)
-                    return {
-                        "respuesta": response.text,
-                        "metadata": {
-                            "num_fragmentos": 1,
-                            "tiene_contexto": True,
-                            "modelo": MODEL_NAME,
-                            "embedding_model": "N/A",
-                            "metodo": "exact_match_formatted"
+                        response = LLM_CLIENT.generate_content(prompt)
+                        return {
+                            "respuesta": response.text,
+                            "metadata": {
+                                "num_fragmentos": 1,
+                                "tiene_contexto": True,
+                                "modelo": MODEL_NAME,
+                                "embedding_model": "N/A",
+                                "metodo": "exact_match_formatted"
+                            }
                         }
-                    }
 
         # --- PASO 3: DECIDIR ESTRATEGIA INTELIGENTE ---
         estrategia = decidir_estrategia_busqueda(query, numero_articulo)
