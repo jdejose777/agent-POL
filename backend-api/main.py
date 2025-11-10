@@ -446,6 +446,9 @@ def generate_rag_response(query: str, historial: list = None):
     5. Corrige encoding en todos los resultados
     """
     import re  # Importar al principio para usar en todo el scope
+    import time  # Para medir tiempo de respuesta
+    
+    start_time = time.time()  # Iniciar contador de tiempo
     
     try:
         print(f"\n{'='*80}")
@@ -610,26 +613,98 @@ Según los hechos descritos (atropello por imprudencia grave), el artículo corr
                 else:
                     print(f"   ℹ️  No se detectó como seguimiento - usando consulta original")
 
-        # --- PASO 1: DETECTAR NÚMERO DE ARTÍCULO ---
+        # --- PASO 1: DETECTAR NÚMERO DE ARTÍCULO O RANGO ---
         articulo_pattern = r'\b(?:art[íi]culo|art\.?)\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\b'
         solo_numero_pattern = r'^\s*(\d+(?:\s+bis|\s+ter|\s+quater)?)\s*$'
         
+        # 🆕 MEJORA #4: Detectar rangos de artículos (ej: "artículos 138 a 142", "del 237 al 244")
+        rango_pattern_1 = r'\b(?:art[íi]culos?|arts?\.?)\s*(\d+)\s*(?:a|al|hasta|-)\s*(?:art[íi]culo|art\.?)?\s*(\d+)\b'
+        rango_pattern_2 = r'\b(?:del|desde)\s*(?:art[íi]culo|art\.?)?\s*(\d+)\s*(?:a|al|hasta)\s*(?:art[íi]culo|art\.?)?\s*(\d+)\b'
+        rango_pattern_3 = r'\b(\d+)\s*(?:a|al|-)\s*(\d+)\s*$'  # Solo números al final
+        
         numero_articulo = None
-        match_articulo = re.search(articulo_pattern, query_enriquecida, re.IGNORECASE)
-        match_numero = re.match(solo_numero_pattern, query_enriquecida)
+        rango_articulos = None
         
-        if match_articulo:
-            numero_articulo = match_articulo.group(1)
-            print(f"🎯 Artículo detectado (patrón completo): {numero_articulo}")
-        elif match_numero:
-            numero_articulo = match_numero.group(1)
-            print(f"🎯 Artículo detectado (solo número): {numero_articulo}")
-        else:
-            print(f"ℹ️  No se detectó número de artículo en la query")
+        # Primero verificar si es un rango
+        match_rango = (re.search(rango_pattern_1, query_enriquecida, re.IGNORECASE) or 
+                       re.search(rango_pattern_2, query_enriquecida, re.IGNORECASE) or
+                       re.search(rango_pattern_3, query_enriquecida, re.IGNORECASE))
         
-        # --- PASO 2: BÚSQUEDA EXACTA INSTANTÁNEA (si hay número de artículo) ---
-        # ⚡ MEJORA #1: Usar cache O(1) en lugar de buscar en PDF con regex
+        if match_rango:
+            inicio = int(match_rango.group(1))
+            fin = int(match_rango.group(2))
+            
+            # Validar que el rango sea razonable (máximo 20 artículos)
+            if inicio < fin and (fin - inicio) <= 20:
+                rango_articulos = (inicio, fin)
+                print(f"📚 Rango de artículos detectado: {inicio} a {fin} ({fin - inicio + 1} artículos)")
+            else:
+                print(f"⚠️ Rango inválido o demasiado amplio: {inicio} a {fin}")
+        
+        # Si no hay rango, buscar artículo individual
+        if not rango_articulos:
+            match_articulo = re.search(articulo_pattern, query_enriquecida, re.IGNORECASE)
+            match_numero = re.match(solo_numero_pattern, query_enriquecida)
+            
+            if match_articulo:
+                numero_articulo = match_articulo.group(1)
+                print(f"🎯 Artículo detectado (patrón completo): {numero_articulo}")
+            elif match_numero:
+                numero_articulo = match_numero.group(1)
+                print(f"🎯 Artículo detectado (solo número): {numero_articulo}")
+            else:
+                print(f"ℹ️  No se detectó número de artículo en la query")
+        
+        # --- PASO 2: BÚSQUEDA EXACTA INSTANTÁNEA ---
+        # ⚡ MEJORA #1: Usar cache O(1) para artículos individuales
+        # 📚 MEJORA #4: Usar cache para rangos de artículos
         # EXCEPCIÓN: Si es una corrección, NO usar cache directo - pasar por Gemini con contexto
+        
+        # 📚 Caso 1: RANGO DE ARTÍCULOS
+        if rango_articulos:
+            inicio, fin = rango_articulos
+            articulos_encontrados = []
+            articulos_faltantes = []
+            
+            print(f"📚 Buscando rango de artículos {inicio} a {fin} en cache...")
+            
+            for num in range(inicio, fin + 1):
+                num_str = str(num)
+                if num_str in ARTICULOS_CACHE:
+                    articulos_encontrados.append((num_str, ARTICULOS_CACHE[num_str]))
+                else:
+                    articulos_faltantes.append(num_str)
+            
+            print(f"✅ Encontrados: {len(articulos_encontrados)}/{fin - inicio + 1} artículos")
+            if articulos_faltantes:
+                print(f"⚠️ No encontrados: {articulos_faltantes}")
+            
+            if articulos_encontrados:
+                # Construir respuesta con todos los artículos del rango
+                respuesta_rango = f"**Artículos {inicio} a {fin} del Código Penal**\n\n"
+                
+                for num, texto in articulos_encontrados:
+                    texto_corregido = corregir_encoding(texto)
+                    respuesta_rango += f"**Artículo {num}**\n\n{texto_corregido}\n\n{'='*70}\n\n"
+                
+                if articulos_faltantes:
+                    respuesta_rango += f"\n⚠️ **Nota:** Los siguientes artículos no se encontraron en la base de datos: {', '.join(articulos_faltantes)}"
+                
+                print(f"⚡ Respuesta de rango generada ({len(respuesta_rango)} caracteres)")
+                return {
+                    "respuesta": respuesta_rango,
+                    "metadata": {
+                        "num_fragmentos": len(articulos_encontrados),
+                        "tiene_contexto": True,
+                        "modelo": "Cache instantáneo - Rango",
+                        "embedding_model": "N/A",
+                        "metodo": "cache_rango",
+                        "fuentes": [f"Artículo {num}" for num, _ in articulos_encontrados],
+                        "tiempo_respuesta": time.time() - start_time
+                    }
+                }
+        
+        # 🎯 Caso 2: ARTÍCULO INDIVIDUAL
         if numero_articulo:
             print(f"🔑 Buscando '{numero_articulo}' en cache...")
             print(f"📋 Cache tiene {len(ARTICULOS_CACHE)} artículos")
