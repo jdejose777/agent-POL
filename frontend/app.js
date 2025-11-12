@@ -4,7 +4,7 @@
  */
 
 // URL de la nueva API FastAPI (reemplaza n8n)
-const WEBHOOK_URL = 'http://localhost:8000/chat';
+const WEBHOOK_URL = 'http://10.1.162.145:8000/chat';
 
 // Elementos del DOM - obtenemos referencias a los elementos principales
 const chatContainer = document.getElementById('chatContainer');
@@ -30,6 +30,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Configurar todos los event listeners
     setupEventListeners();
+    
+    // Configurar comparador
+    setupComparador();
     
     // Verificar configuración del webhook
     checkWebhookConfiguration();
@@ -230,6 +233,67 @@ function addUserMessage(message) {
 }
 
 /**
+ * RESALTAR ARTÍCULOS EN EL CONTENIDO
+ * Detecta menciones a artículos del Código Penal y les añade highlighting
+ * @param {string} htmlContent - Contenido HTML procesado por marked
+ * @returns {string} - Contenido con artículos resaltados
+ */
+function highlightArticulos(htmlContent) {
+    // Patrones para detectar artículos:
+    // - "Artículo 234"
+    // - "artículo 234"
+    // - "art. 234"
+    // - "Art. 234"
+    // - "arts. 234 y 456" (múltiples artículos)
+    // - "Artículos 234, 456 y 789"
+    
+    const patronArticulos = /(Artículo|artículo|Art\.|art\.|Arts\.|arts\.|Artículos|artículos)\s+(\d+(?:\s*,\s*\d+)*(?:\s+y\s+\d+)?)/gi;
+    
+    const contentWithHighlight = htmlContent.replace(patronArticulos, (match, prefix, numeros) => {
+        // Extraer todos los números de artículos mencionados
+        const numerosArray = numeros.match(/\d+/g);
+        
+        // Construir el texto resaltado
+        let highlightedText = '';
+        
+        if (numerosArray.length === 1) {
+            // Un solo artículo
+            highlightedText = `<span class="article-highlight" data-article="${numerosArray[0]}" onclick="scrollToArticle(${numerosArray[0]})">${prefix} ${numerosArray[0]}</span>`;
+        } else {
+            // Múltiples artículos - resaltar cada uno
+            const numerosParts = numeros.split(/(\d+)/);
+            highlightedText = prefix + ' ';
+            numerosParts.forEach(part => {
+                if (/^\d+$/.test(part)) {
+                    // Es un número - resaltarlo
+                    highlightedText += `<span class="article-highlight" data-article="${part}" onclick="scrollToArticle(${part})">${part}</span>`;
+                } else if (part.trim()) {
+                    // Es texto separador (comas, "y", etc.)
+                    highlightedText += part;
+                }
+            });
+        }
+        
+        return highlightedText;
+    });
+    
+    console.log('🎨 Artículos resaltados en el contenido');
+    return contentWithHighlight;
+}
+
+/**
+ * SCROLL A UN ARTÍCULO ESPECÍFICO (FUNCIONALIDAD FUTURA)
+ * Placeholder para navegación a artículos específicos
+ * @param {number} numeroArticulo - Número del artículo
+ */
+function scrollToArticle(numeroArticulo) {
+    console.log(`📜 Navegando al Artículo ${numeroArticulo} (funcionalidad futura)`);
+    // TODO: Implementar navegación o búsqueda del artículo en el chat
+    // Por ahora solo mostramos un mensaje
+    alert(`Artículo ${numeroArticulo} del Código Penal\n\n(La navegación automática se implementará en una futura versión)`);
+}
+
+/**
  * CREAR Y AÑADIR MENSAJE DEL BOT AL CHAT
  * Crea un elemento div para mostrar la respuesta del bot con formato Markdown
  */
@@ -249,9 +313,15 @@ function addBotMessage(message, type = 'normal') {
             gfm: true,     // GitHub Flavored Markdown
         });
         formattedMessage = marked.parse(message);
+        
+        // ⚡ MEJORA #8: Resaltar artículos del Código Penal
+        formattedMessage = highlightArticulos(formattedMessage);
     } else {
         // Fallback si marked no está disponible
         formattedMessage = `<p>${escapeHtml(message)}</p>`;
+        
+        // Intentar highlighting incluso sin marked
+        formattedMessage = highlightArticulos(formattedMessage);
     }
     
     // Construir el HTML del mensaje con avatar y contenido formateado
@@ -517,110 +587,178 @@ window.ChatUtils = ChatUtils;
 
 /**
  * ============================================
- * COMPARADOR DE ARTÍCULOS
+ * CONFIGURACIÓN DEL COMPARADOR DE ARTÍCULOS
  * ============================================
  */
-
-// Elementos del modal
-const modalComparador = document.getElementById('modalComparador');
-const comparadorBtn = document.getElementById('comparadorBtn');
-const closeModal = document.getElementById('closeModal');
-const compararBtn = document.getElementById('compararBtn');
-const articulo1Input = document.getElementById('articulo1');
-const articulo2Input = document.getElementById('articulo2');
-
-// Abrir modal
-comparadorBtn.addEventListener('click', () => {
-    modalComparador.classList.add('show');
-    articulo1Input.focus();
-});
-
-// Cerrar modal
-closeModal.addEventListener('click', () => {
-    modalComparador.classList.remove('show');
-});
-
-// Cerrar modal al hacer clic fuera
-modalComparador.addEventListener('click', (e) => {
-    if (e.target === modalComparador) {
-        modalComparador.classList.remove('show');
-    }
-});
-
-// Función para comparar artículos
-async function compararArticulos() {
-    const art1 = articulo1Input.value.trim();
-    const art2 = articulo2Input.value.trim();
+function setupComparador() {
+    console.log('🔧 Iniciando configuración del comparador...');
+    console.log('🔧 DOMContentLoaded ya ejecutado');
     
-    // Validar inputs
-    if (!art1 || !art2) {
-        alert('Por favor, introduce ambos números de artículo');
+    // Esperar un poco para asegurar que el DOM está completamente cargado
+    setTimeout(() => {
+        console.log('⏰ Ejecutando configuración tras timeout...');
+        
+        // Elementos del modal
+        const modalComparador = document.getElementById('modalComparador');
+        const comparadorBtn = document.getElementById('comparadorBtn');
+        const closeModal = document.getElementById('closeModal');
+        const compararBtn = document.getElementById('compararBtn');
+        const articulo1Input = document.getElementById('articulo1');
+        const articulo2Input = document.getElementById('articulo2');
+    
+    // Verificar que todos los elementos existen
+    console.log('📋 Verificando elementos del DOM:');
+    console.log('  - modalComparador:', modalComparador ? '✅' : '❌');
+    console.log('  - comparadorBtn:', comparadorBtn ? '✅' : '❌');
+    console.log('  - closeModal:', closeModal ? '✅' : '❌');
+    console.log('  - compararBtn:', compararBtn ? '✅' : '❌');
+    console.log('  - articulo1Input:', articulo1Input ? '✅' : '❌');
+    console.log('  - articulo2Input:', articulo2Input ? '✅' : '❌');
+    
+    if (!modalComparador || !comparadorBtn) {
+        console.error('❌ Elementos del comparador no encontrados');
         return;
     }
     
-    if (art1 === art2) {
-        alert('Por favor, introduce dos artículos diferentes');
-        return;
-    }
+    // Abrir modal
+    comparadorBtn.addEventListener('click', (e) => {
+        console.log('🔍 Click en botón comparador');
+        e.preventDefault();
+        modalComparador.classList.add('show');
+        modalComparador.style.display = 'flex';
+        articulo1Input.focus();
+        console.log('✅ Modal abierto');
+    });
     
     // Cerrar modal
-    modalComparador.classList.remove('show');
+    closeModal.addEventListener('click', (e) => {
+        console.log('❌ Cerrando modal comparador');
+        e.preventDefault();
+        modalComparador.classList.remove('show');
+        modalComparador.style.display = 'none';
+    });
     
-    // Mostrar mensaje en el chat
-    const userMessage = `⚖️ Comparar artículo ${art1} vs artículo ${art2}`;
-    addMessageToChat(userMessage, 'user');
+    // Cerrar modal al hacer clic fuera
+    modalComparador.addEventListener('click', (e) => {
+        if (e.target === modalComparador) {
+            console.log('❌ Click fuera del modal - cerrando');
+            modalComparador.classList.remove('show');
+            modalComparador.style.display = 'none';
+        }
+    });
     
-    // Mostrar indicador de escritura
-    showTypingIndicator();
-    
-    try {
-        // Llamar al endpoint de comparación
-        const response = await fetch(`http://localhost:8000/comparar?art1=${art1}&art2=${art2}`);
+    // Función para comparar artículos
+    async function compararArticulos() {
+        const art1 = articulo1Input.value.trim();
+        const art2 = articulo2Input.value.trim();
         
-        if (!response.ok) {
-            throw new Error(`Error ${response.status}: ${response.statusText}`);
+        console.log(`⚖️ Iniciando comparación: ${art1} vs ${art2}`);
+        
+        // Validar inputs
+        if (!art1 || !art2) {
+            alert('Por favor, introduce ambos números de artículo');
+            console.warn('⚠️ Inputs vacíos');
+            return;
         }
         
-        const data = await response.json();
-        
-        // Remover indicador de escritura
-        removeTypingIndicator();
-        
-        // Mostrar comparación en el chat
-        if (data.comparacion) {
-            addMessageToChat(data.comparacion, 'bot');
-        } else if (data.error) {
-            addMessageToChat(`❌ Error: ${data.error}`, 'bot');
+        if (art1 === art2) {
+            alert('Por favor, introduce dos artículos diferentes');
+            console.warn('⚠️ Artículos iguales');
+            return;
         }
         
-        // Limpiar inputs
-        articulo1Input.value = '';
-        articulo2Input.value = '';
+        // Cerrar modal
+        modalComparador.classList.remove('show');
+        modalComparador.style.display = 'none';
+        console.log('✅ Modal cerrado');
         
-    } catch (error) {
-        console.error('Error al comparar artículos:', error);
-        removeTypingIndicator();
-        addMessageToChat(`❌ Error al comparar artículos: ${error.message}`, 'bot');
+        // Mostrar mensaje en el chat
+        const userMessage = `⚖️ Comparar artículo ${art1} vs artículo ${art2}`;
+        addMessageToChat(userMessage, 'user');
+        console.log('📨 Mensaje agregado al chat');
+        
+        // Mostrar indicador de escritura
+        showTypingIndicator();
+        console.log('⏳ Indicador de escritura mostrado');
+        
+        try {
+            const url = `http://10.1.162.145:8000/comparar?art1=${art1}&art2=${art2}`;
+            console.log(`🌐 Llamando a: ${url}`);
+            
+            // Llamar al endpoint de comparación
+            const response = await fetch(url);
+            console.log(`📡 Respuesta recibida: ${response.status} ${response.statusText}`);
+            
+            if (!response.ok) {
+                throw new Error(`Error ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            console.log('📦 Datos parseados:', data);
+            
+            // Remover indicador de escritura
+            removeTypingIndicator();
+            console.log('✅ Indicador removido');
+            
+            // Mostrar comparación en el chat
+            if (data.comparacion) {
+                addMessageToChat(data.comparacion, 'bot');
+                console.log('✅ Comparación agregada al chat');
+            } else if (data.error) {
+                addMessageToChat(`❌ Error: ${data.error}`, 'bot');
+                console.error('❌ Error en respuesta:', data.error);
+            } else {
+                console.error('❌ Formato de respuesta inesperado:', data);
+                addMessageToChat('❌ Error: Formato de respuesta inesperado', 'bot');
+            }
+            
+            // Limpiar inputs
+            articulo1Input.value = '';
+            articulo2Input.value = '';
+            console.log('🧹 Inputs limpiados');
+            
+        } catch (error) {
+            console.error('❌ Error al comparar artículos:', error);
+            removeTypingIndicator();
+            addMessageToChat(`❌ Error al comparar artículos: ${error.message}`, 'bot');
+        }
     }
+    
+    // Event listener para el botón de comparar
+    if (compararBtn) {
+        compararBtn.addEventListener('click', (e) => {
+            console.log('👆 Click en botón COMPARAR');
+            e.preventDefault();
+            e.stopPropagation();
+            compararArticulos();
+        });
+        console.log('✅ Event listener del botón COMPARAR registrado');
+    } else {
+        console.error('❌ No se pudo registrar event listener - compararBtn no existe');
+    }
+    
+    // Permitir Enter en los inputs para comparar
+    articulo1Input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            console.log('⏎ Enter en artículo 1 - moviendo a artículo 2');
+            articulo2Input.focus();
+        }
+    });
+    
+    articulo2Input.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            console.log('⏎ Enter en artículo 2 - ejecutando comparación');
+            compararArticulos();
+        }
+    });
+    
+    console.log('✅ Comparador de artículos configurado correctamente');
+    }, 100); // Cierre del setTimeout
 }
 
-// Event listener para el botón de comparar
-compararBtn.addEventListener('click', compararArticulos);
-
-// Permitir Enter en los inputs para comparar
-articulo1Input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        articulo2Input.focus();
-    }
-});
-
-articulo2Input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        compararArticulos();
-    }
-});
-
 console.log('✨ Aplicación de Chat RAG cargada completamente');
-console.log('⚖️  Comparador de artículos integrado');
+console.log('⚖️  Comparador de artículos disponible');
 console.log('🔧 Utilidades disponibles en window.ChatUtils');
 console.log('📝 Consulta los comentarios del código para instrucciones de configuración');

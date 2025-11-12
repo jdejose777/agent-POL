@@ -15,6 +15,23 @@ from vertexai.generative_models import GenerativeModel
 from pinecone import Pinecone
 import vertexai
 
+# ⚡ MEJORA #7: Importar función de expansión semántica
+from semantic_utils import expandir_query_con_sinonimos, SINONIMOS_LEGALES
+
+# 🗄️ MEJORA #9: Redis para caché persistente
+import redis
+import json
+from typing import Optional
+
+# 🗄️ MEJORA #10: PostgreSQL para historial de conversaciones
+from database import get_db_session, check_db_connection, get_db_stats, DB_AVAILABLE
+from crud import (
+    create_message, get_or_create_conversation, log_article_query,
+    get_conversation_with_messages, get_conversations, get_global_stats
+)
+import time
+import uuid
+
 # Cargar las variables de entorno desde .env
 load_dotenv()
 
@@ -31,29 +48,53 @@ TOP_K_RESULTS = 20  # Aumentado a 20 para mayor cobertura de artículos largos p
 TOP_K_MIN = 10  # Mínimo para consultas simples
 TOP_K_MAX = 30  # Máximo para consultas complejas
 
+# 🗄️ Configuración de Redis
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_DB = int(os.getenv("REDIS_DB", 0))
+REDIS_TTL = int(os.getenv("REDIS_TTL", 86400))  # 24 horas por defecto
+
 # --- INICIALIZACIÓN DE SERVICIOS ---
 print("🔧 Inicializando Vertex AI y Pinecone...")
 
 # Variables globales para búsqueda exacta y cache
 TEXTO_COMPLETO_PDF = None
-ARTICULOS_CACHE = {}  # Cache: {numero_articulo: texto_completo_articulo}
+ARTICULOS_CACHE = {}  # Cache en memoria (deprecated, usar Redis)
+REDIS_CLIENT = None  # Cliente Redis global
 
 try:
     # A. Inicializar Vertex AI
     vertexai.init(project=PROJECT_ID, location=REGION)
     print(f"✅ Vertex AI inicializado - Proyecto: {PROJECT_ID}, Región: {REGION}")
     
-    # B. Inicializar Pinecone
+    # B. Inicializar Redis
+    try:
+        REDIS_CLIENT = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            db=REDIS_DB,
+            decode_responses=True,
+            socket_connect_timeout=5
+        )
+        # Test de conexión
+        REDIS_CLIENT.ping()
+        print(f"✅ Redis conectado - {REDIS_HOST}:{REDIS_PORT} (DB: {REDIS_DB})")
+    except redis.ConnectionError as e:
+        print(f"⚠️ Redis no disponible: {e}")
+        print("⚠️ Usando caché en memoria como fallback")
+        REDIS_CLIENT = None
+    
+    # C. Inicializar Pinecone
     pc = Pinecone(api_key=PINECONE_API_KEY)
     PINECONE_INDEX = pc.Index(PINECONE_INDEX_NAME)
     print(f"✅ Pinecone conectado - Índice: {PINECONE_INDEX_NAME}")
 
-    # C. Cargar Modelos de Vertex AI
+    # D. Cargar Modelos de Vertex AI
     EMBEDDING_CLIENT = TextEmbeddingModel.from_pretrained(EMBEDDING_MODEL)
     LLM_CLIENT = GenerativeModel(MODEL_NAME)
     print(f"✅ Modelos cargados - Embeddings: {EMBEDDING_MODEL}, LLM: {MODEL_NAME}")
     
-    # D. Cargar texto completo del PDF para búsqueda exacta
+    # E. Cargar texto completo del PDF para búsqueda exacta
     try:
         import PyPDF2
         import re
@@ -130,6 +171,8 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     pregunta: str
     historial: list[ChatMessage] = []  # ⚡ MEJORA #3: Historial conversacional
+    session_id: Optional[str] = None  # 🗄️ MEJORA #10: ID de sesión para tracking
+    user_id: Optional[str] = None  # 🗄️ MEJORA #10: ID de usuario (opcional)
 
 
 class ChatResponse(BaseModel):
@@ -154,7 +197,97 @@ app.add_middleware(
 )
 
 
-# --- 4. FUNCIÓN CENTRAL DE RAG CON VERTEX AI ---
+# --- 4. FUNCIONES DE CACHÉ REDIS ---
+
+def get_cached_articulo(numero: str) -> Optional[dict]:
+    """
+    🗄️ MEJORA #9: Obtener artículo desde Redis cache
+    
+    Args:
+        numero: Número del artículo (puede incluir "bis", "ter", etc.)
+        
+    Returns:
+        Dict con datos del artículo o None si no está en caché
+    """
+    if not REDIS_CLIENT:
+        return None
+    
+    try:
+        key = f"articulo:{numero}"
+        cached_data = REDIS_CLIENT.get(key)
+        
+        if cached_data:
+            print(f"🗄️ Artículo {numero} encontrado en Redis cache")
+            return json.loads(cached_data)
+        
+        return None
+    except Exception as e:
+        print(f"⚠️ Error al leer de Redis: {e}")
+        return None
+
+
+def set_cached_articulo(numero: str, texto: str, metadata: dict = None) -> bool:
+    """
+    🗄️ MEJORA #9: Guardar artículo en Redis cache
+    
+    Args:
+        numero: Número del artículo
+        texto: Texto completo del artículo
+        metadata: Metadatos adicionales (opcional)
+        
+    Returns:
+        True si se guardó correctamente, False en caso de error
+    """
+    if not REDIS_CLIENT:
+        return False
+    
+    try:
+        key = f"articulo:{numero}"
+        data = {
+            "numero": numero,
+            "texto": texto,
+            "metadata": metadata or {},
+            "cached_at": str(os.times())
+        }
+        
+        # Guardar con TTL
+        REDIS_CLIENT.setex(key, REDIS_TTL, json.dumps(data))
+        print(f"🗄️ Artículo {numero} guardado en Redis (TTL: {REDIS_TTL}s)")
+        return True
+    except Exception as e:
+        print(f"⚠️ Error al guardar en Redis: {e}")
+        return False
+
+
+def get_cache_stats() -> dict:
+    """
+    🗄️ Obtener estadísticas del caché Redis
+    
+    Returns:
+        Dict con estadísticas del caché
+    """
+    if not REDIS_CLIENT:
+        return {"status": "disabled", "keys": 0}
+    
+    try:
+        # Obtener info de Redis
+        info = REDIS_CLIENT.info()
+        
+        # Contar claves de artículos
+        articulos_keys = REDIS_CLIENT.keys("articulo:*")
+        
+        return {
+            "status": "connected",
+            "total_keys": len(articulos_keys),
+            "memory_used": info.get("used_memory_human", "N/A"),
+            "uptime_seconds": info.get("uptime_in_seconds", 0),
+            "redis_version": info.get("redis_version", "unknown")
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+# --- 5. FUNCIÓN CENTRAL DE RAG CON VERTEX AI ---
 
 def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
     """
@@ -162,16 +295,27 @@ def buscar_articulo_exacto(texto_completo: str, numero_articulo: str) -> str:
     Soporta artículos simples (142) y con sufijos (142 bis, 127 ter, etc.)
     
     ⚡ MEJORA #1: Búsqueda instantánea desde cache construido al inicio
+    🗄️ MEJORA #9: Cache persistente con Redis
     """
     import re
     
     # Normalizar el número de artículo
     numero_articulo = numero_articulo.strip()
     
-    # ⚡ PASO 1: Buscar en cache primero (O(1) - instantáneo)
+    # ⚡ PASO 0: Intentar obtener de Redis primero
+    cached = get_cached_articulo(numero_articulo)
+    if cached:
+        return cached.get("texto", "")
+    
+    # ⚡ PASO 1: Buscar en cache en memoria (O(1) - instantáneo)
     if numero_articulo in ARTICULOS_CACHE:
-        print(f"⚡ Artículo {numero_articulo} encontrado en cache (búsqueda instantánea)")
-        return ARTICULOS_CACHE[numero_articulo]
+        print(f"⚡ Artículo {numero_articulo} encontrado en cache en memoria")
+        texto = ARTICULOS_CACHE[numero_articulo]
+        
+        # Guardar en Redis para próximas consultas
+        set_cached_articulo(numero_articulo, texto)
+        
+        return texto
     
     # PASO 2: Si no está en cache, buscar con regex (O(n) - lento)
     print(f"🔍 Artículo {numero_articulo} no en cache, buscando con regex...")
@@ -803,10 +947,13 @@ Responde ahora:"""
             query_enriquecida_embedding = query_enriquecida
             if query_enriquecida != query:
                 print(f"🔄 Usando query enriquecida con contexto conversacional")
+        
+        # 🔍 MEJORA #6: Expansión semántica con sinónimos legales
+        query_expandida_semantica = expandir_query_con_sinonimos(query_enriquecida_embedding)
 
         # --- PASO 5: GENERAR EMBEDDING ---
         print("🔢 Generando embedding con Vertex AI...")
-        embeddings = EMBEDDING_CLIENT.get_embeddings([query_enriquecida_embedding])
+        embeddings = EMBEDDING_CLIENT.get_embeddings([query_expandida_semantica])
         query_vector = embeddings[0].values
         print(f"✅ Embedding generado: {len(query_vector)} dimensiones")
 
@@ -1112,30 +1259,96 @@ async def handle_chat_request(request: ChatRequest):
     basada en el contexto del Código Penal usando Vertex AI.
     
     ⚡ MEJORA #3: Soporte para historial conversacional
+    🗄️ MEJORA #10: Persistencia en PostgreSQL
     """
     pregunta_usuario = request.pregunta
     historial = request.historial if hasattr(request, 'historial') else []
+    session_id = request.session_id if hasattr(request, 'session_id') and request.session_id else str(uuid.uuid4())
+    user_id = request.user_id if hasattr(request, 'user_id') else None
     
     print(f"\n{'='*60}")
     print(f"📨 Nueva petición recibida")
+    print(f"🔑 Session ID: {session_id}")
     if historial:
         print(f"💬 Con historial de {len(historial)} mensajes")
     print(f"{'='*60}")
     
+    # 🗄️ MEJORA #10: Guardar pregunta del usuario en PostgreSQL
+    db = get_db_session()
+    conversation_id = None
+    start_time = time.time()
+    
+    if db and DB_AVAILABLE:
+        try:
+            # Obtener o crear conversación
+            conversation = get_or_create_conversation(
+                db=db,
+                session_id=session_id,
+                user_id=user_id
+            )
+            conversation_id = conversation.id
+            
+            # Guardar mensaje del usuario
+            create_message(
+                db=db,
+                conversation_id=conversation_id,
+                role="user",
+                content=pregunta_usuario,
+                tokens=None,  # No calculamos tokens del usuario
+                response_time_ms=None
+            )
+            print(f"🗄️ Pregunta guardada en PostgreSQL (conversation_id: {conversation_id})")
+        except Exception as e:
+            print(f"⚠️ Error guardando en PostgreSQL: {e}")
+        finally:
+            if db:
+                db.close()
+    
     # Llamar a la función RAG con Vertex AI, pasando el historial
     resultado = generate_rag_response(pregunta_usuario, historial)
+    
+    # Calcular tiempo de respuesta
+    response_time_ms = (time.time() - start_time) * 1000
+    
+    # 🗄️ MEJORA #10: Guardar respuesta del asistente en PostgreSQL
+    if DB_AVAILABLE and conversation_id:
+        db = get_db_session()
+        try:
+            # Guardar respuesta del asistente
+            create_message(
+                db=db,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=resultado["respuesta"],
+                tokens=resultado["metadata"].get("total_tokens", None),
+                response_time_ms=response_time_ms,
+                extra_data={
+                    "num_fragmentos": resultado["metadata"].get("num_fragmentos", 0),
+                    "tiene_contexto": resultado["metadata"].get("tiene_contexto", False),
+                    "modelo": resultado["metadata"].get("modelo", MODEL_NAME)
+                }
+            )
+            print(f"🗄️ Respuesta guardada en PostgreSQL (tiempo: {response_time_ms:.2f}ms)")
+        except Exception as e:
+            print(f"⚠️ Error guardando respuesta: {e}")
+        finally:
+            if db:
+                db.close()
     
     return ChatResponse(
         respuesta=resultado["respuesta"],
         metadata={
             "pregunta": pregunta_usuario,
+            "session_id": session_id,
             "tieneContexto": resultado["metadata"].get("tiene_contexto", False),
             "numeroResultados": resultado["metadata"].get("num_fragmentos", 0),
             "modelo": resultado["metadata"].get("modelo", MODEL_NAME),
             "dominio": "codigo-penal-espanol",
-            "proveedor": "Vertex AI (Google Cloud)"
+            "proveedor": "Vertex AI (Google Cloud)",
+            "response_time_ms": round(response_time_ms, 2)
         }
     )
+
 
 
 # --- ENDPOINT: COMPARADOR DE ARTÍCULOS ⚖️ ---
@@ -1202,7 +1415,7 @@ async def comparar_articulos(art1: str, art2: str):
         
         print(f"✅ Ambos artículos recuperados")
         
-        # Generar comparación con Gemini
+        # Generar comparación con Gemini - Formato de TABLA COMPARATIVA
         prompt = f"""Eres un experto en Derecho Penal español especializado en análisis comparativo de delitos.
 
 Se te han proporcionado dos artículos del Código Penal para comparar:
@@ -1213,73 +1426,83 @@ Se te han proporcionado dos artículos del Código Penal para comparar:
 **ARTÍCULO {art2}:**
 {texto_art2}
 
+**⚠️ ADVERTENCIA CRÍTICA:**
+- ❌ **NUNCA** incluyas el texto completo de los artículos en tu respuesta
+- ❌ **NUNCA** copies párrafos literales de los artículos
+- ❌ **NUNCA** muestres "Artículo X. [texto completo...]"
+- ✅ **SOLO** genera las TABLAS COMPARATIVAS con información resumida y concisa
+
 **TU TAREA:**
-Genera un análisis comparativo COMPLETO y ESTRUCTURADO en formato Markdown con las siguientes secciones:
+Genera EXCLUSIVAMENTE una TABLA COMPARATIVA VISUAL en formato Markdown. Tu respuesta debe contener SOLO tablas, NO texto literal de los artículos.
 
-## **Comparación: Artículo {art1} vs Artículo {art2}**
+## ⚖️ **Comparación: Artículo {art1} vs Artículo {art2}**
 
-### **📋 Resumen de cada artículo**
+### 📊 **Tabla Comparativa Completa**
 
-**Artículo {art1}:**
-- Delito tipificado: [nombre del delito]
-- Bien jurídico protegido: [vida, integridad física, patrimonio, etc.]
-- Naturaleza: [doloso/imprudente/específico]
-
-**Artículo {art2}:**
-- Delito tipificado: [nombre del delito]
-- Bien jurídico protegido: [vida, integridad física, patrimonio, etc.]
-- Naturaleza: [doloso/imprudente/específico]
-
-### **⚖️ Tabla Comparativa**
-
-| Aspecto | Artículo {art1} | Artículo {art2} |
-|---------|----------------|----------------|
-| **Delito** | [nombre] | [nombre] |
-| **Pena mínima** | [X años/meses] | [X años/meses] |
-| **Pena máxima** | [X años/meses] | [X años/meses] |
-| **Elemento distintivo** | [característica clave] | [característica clave] |
-| **Tipo penal** | [básico/agravado/cualificado] | [básico/agravado/cualificado] |
-
-### **🔍 Diferencias clave**
-
-1. **[Diferencia principal]:** [Explicación detallada]
-2. **[Segunda diferencia]:** [Explicación detallada]
-3. **[Tercera diferencia]:** [Explicación detallada]
-
-### **🤝 Similitudes**
-
-- [Similitud 1 si existe]
-- [Similitud 2 si existe]
-- [Si no hay similitudes significativas, indicarlo]
-
-### **📚 Ejemplos prácticos**
-
-**Caso que aplicaría Art. {art1}:**
-[Ejemplo concreto de situación real]
-
-**Caso que aplicaría Art. {art2}:**
-[Ejemplo concreto de situación real]
-
-**Caso dudoso (diferenciación):**
-[Ejemplo donde se debe elegir entre uno u otro, explicando el criterio]
-
-### **⚡ Conclusión**
-
-**Cuándo aplicar Art. {art1}:** [Criterio claro]
-**Cuándo aplicar Art. {art2}:** [Criterio claro]
-**Criterio diferenciador clave:** [El factor determinante para elegir uno u otro]
+| 🔍 **Aspecto** | 📕 **Artículo {art1}** | 📘 **Artículo {art2}** |
+|:--------------|:---------------------|:---------------------|
+| **📌 Delito** | [Nombre exacto del delito] | [Nombre exacto del delito] |
+| **⚖️ Bien jurídico protegido** | [Ej: Vida, Patrimonio, Integridad] | [Ej: Vida, Patrimonio, Integridad] |
+| **🎯 Naturaleza** | [Doloso/Imprudente/Culposo] | [Doloso/Imprudente/Culposo] |
+| **⏱️ Pena mínima** | [X años/meses] | [X años/meses] |
+| **⏱️ Pena máxima** | [X años/meses] | [X años/meses] |
+| **💡 Elemento clave** | [Elemento distintivo fundamental] | [Elemento distintivo fundamental] |
+| **📋 Tipo penal** | [Básico/Agravado/Cualificado] | [Básico/Agravado/Cualificado] |
+| **⚡ Requisitos específicos** | [Requisitos que deben cumplirse] | [Requisitos que deben cumplirse] |
 
 ---
 
-**INSTRUCCIONES IMPORTANTES:**
-- Sé ESPECÍFICO con las penas (usa números exactos)
-- EXPLICA por qué son diferentes/similares
-- Usa lenguaje claro y accesible
-- Incluye ejemplos CONCRETOS y realistas
-- Si los artículos son muy diferentes (ej: uno sobre vida, otro sobre patrimonio), explica que no son comparables directamente pero analiza sus diferencias
-- Si son del mismo tipo de delito, profundiza en los matices que los distinguen
+### 🔍 **Diferencias Principales**
 
-GENERA LA COMPARACIÓN AHORA:"""
+| # | Concepto | Art. {art1} | Art. {art2} |
+|:-:|:---------|:-----------|:-----------|
+| **1** | **[Aspecto diferenciador 1]** | [Explicación breve] | [Explicación breve] |
+| **2** | **[Aspecto diferenciador 2]** | [Explicación breve] | [Explicación breve] |
+| **3** | **[Aspecto diferenciador 3]** | [Explicación breve] | [Explicación breve] |
+
+---
+
+### 🤝 **Similitudes**
+- [Listar similitudes si existen, o indicar "**No hay similitudes significativas** - son delitos de naturaleza diferente"]
+
+---
+
+### 📚 **Ejemplos de Aplicación**
+
+| Situación | Artículo Aplicable | Razón |
+|:----------|:------------------|:------|
+| **Ejemplo 1:** [Caso concreto corto] | **Art. {art1}** | [Por qué aplica este] |
+| **Ejemplo 2:** [Caso concreto corto] | **Art. {art2}** | [Por qué aplica este] |
+| **Caso dudoso:** [Situación ambigua] | **Depende de...** | [Criterio diferenciador clave] |
+
+---
+
+### ⚡ **Conclusión Rápida**
+
+| Cuándo usar | Criterio determinante |
+|:------------|:---------------------|
+| **Art. {art1}** | [Condición específica clara] |
+| **Art. {art2}** | [Condición específica clara] |
+| **Factor clave** | ➡️ **[EL ELEMENTO QUE DETERMINA CUÁL APLICAR]** |
+
+---
+
+**INSTRUCCIONES CRÍTICAS - LEE ESTO ANTES DE RESPONDER:**
+1. ❌ **PROHIBIDO ABSOLUTO:** Copiar el texto literal de los artículos
+2. ❌ **PROHIBIDO ABSOLUTO:** Incluir párrafos completos de los artículos
+3. ❌ **PROHIBIDO ABSOLUTO:** Responder con "Artículo X. [texto completo]"
+4. ✅ **OBLIGATORIO:** USA SOLO TABLAS - Nada de párrafos largos
+5. ✅ **OBLIGATORIO:** SÉ CONCISO - Máximo 1-2 líneas por celda
+6. ✅ **OBLIGATORIO:** USA NÚMEROS EXACTOS para penas (no texto literal)
+7. ✅ **OBLIGATORIO:** USA EMOJIS para mejor visualización
+8. ✅ **OBLIGATORIO:** ENFÓCATE en diferencias prácticas y aplicables
+9. ✅ **OBLIGATORIO:** Ejemplos CORTOS y CONCRETOS (1 línea cada uno)
+
+**FORMATO DE RESPUESTA VÁLIDO:**
+Tu respuesta debe empezar DIRECTAMENTE con "## ⚖️ **Comparación: Artículo X vs Artículo Y**" seguido de las tablas.
+NO incluyas ningún texto de los artículos antes de las tablas.
+
+GENERA LA TABLA COMPARATIVA AHORA (SOLO TABLAS, SIN TEXTO DE ARTÍCULOS):"""
 
         print(f"⚖️  Generando comparación con Gemini...")
         response = LLM_CLIENT.generate_content(prompt)
@@ -1312,15 +1535,31 @@ GENERA LA COMPARACIÓN AHORA:"""
 # --- 6. ENDPOINT DE SALUD ---
 @app.get("/health")
 async def health_check():
-    """Endpoint para verificar que la API está funcionando"""
+    """
+    Endpoint para verificar que la API está funcionando
+    🗄️ MEJORA #9: Incluye estadísticas de Redis cache
+    🗄️ MEJORA #10: Incluye estadísticas de PostgreSQL
+    """
+    cache_stats = get_cache_stats()
+    db_connection = check_db_connection()
+    db_stats = get_db_stats() if DB_AVAILABLE else {"available": False}
+    
     return {
         "status": "healthy",
         "service": "RAG API - Código Penal (Vertex AI)",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "provider": "Google Cloud Vertex AI",
         "models": {
             "llm": MODEL_NAME,
             "embeddings": EMBEDDING_MODEL
+        },
+        "cache": {
+            "redis": cache_stats,
+            "memory_cache_size": len(ARTICULOS_CACHE)
+        },
+        "database": {
+            "postgresql": db_connection,
+            "stats": db_stats
         }
     }
 
@@ -1329,13 +1568,20 @@ async def health_check():
 @app.get("/")
 async def root():
     """Información básica de la API"""
+    cache_stats = get_cache_stats()
+    db_stats = get_db_stats() if DB_AVAILABLE else {"available": False}
+    
     return {
         "message": "API RAG - Código Penal Español (Vertex AI)",
-        "version": "2.1.0",
+        "version": "3.0.0",
         "provider": "Google Cloud Platform",
+        "cache_status": cache_stats.get("status", "unknown"),
+        "database_available": DB_AVAILABLE,
         "endpoints": {
             "chat": "/chat (POST) - Consulta general con memoria conversacional",
             "comparar": "/comparar?art1=X&art2=Y (GET) - Compara dos artículos",
+            "conversations": "/conversations (GET) - Historial de conversaciones",
+            "analytics": "/analytics (GET) - Estadísticas del sistema",
             "health": "/health (GET) - Estado del servicio",
             "docs": "/docs - Documentación interactiva"
         },
@@ -1344,7 +1590,8 @@ async def root():
             "cache_instantaneo": "✅ Búsqueda O(1) para artículos",
             "rangos_articulos": "✅ Consulta de rangos (ej: '138 a 142')",
             "comparador": "✅ Análisis comparativo de artículos",
-            "correccion_usuario": "✅ Validación bidireccional"
+            "correccion_usuario": "✅ Validación bidireccional",
+            "persistencia_postgresql": "✅ Historial persistente" if DB_AVAILABLE else "❌ Base de datos no disponible"
         },
         "models": {
             "generacion": MODEL_NAME,
@@ -1352,3 +1599,151 @@ async def root():
         }
     }
 
+
+# ====================================================================
+# 🗄️ MEJORA #10: ENDPOINTS DE HISTORIAL Y ANALYTICS
+# ====================================================================
+
+@app.get("/conversations")
+async def get_all_conversations(skip: int = 0, limit: int = 50, user_id: Optional[str] = None):
+    """
+    📋 Obtener lista de conversaciones
+    
+    Parámetros:
+    - skip: Número de conversaciones a saltar (paginación)
+    - limit: Número máximo de conversaciones a retornar
+    - user_id: Filtrar por usuario específico (opcional)
+    
+    Retorna lista de conversaciones con metadata básica
+    """
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    
+    db = get_db_session()
+    try:
+        conversations = get_conversations(db, skip=skip, limit=limit, user_id=user_id)
+        
+        return {
+            "total": len(conversations),
+            "skip": skip,
+            "limit": limit,
+            "conversations": [
+                {
+                    "id": conv.id,
+                    "session_id": conv.session_id,
+                    "user_id": conv.user_id,
+                    "started_at": conv.started_at.isoformat(),
+                    "last_message_at": conv.last_message_at.isoformat(),
+                    "total_messages": conv.total_messages,
+                    "total_tokens": conv.total_tokens,
+                    "is_active": conv.is_active
+                }
+                for conv in conversations
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo conversaciones: {str(e)}")
+    finally:
+        if db:
+            db.close()
+
+
+@app.get("/conversations/{conversation_id}")
+async def get_conversation_detail(conversation_id: int):
+    """
+    💬 Obtener conversación completa con todos sus mensajes
+    
+    Parámetros:
+    - conversation_id: ID de la conversación
+    
+    Retorna conversación con array completo de mensajes
+    """
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    
+    db = get_db_session()
+    try:
+        conversation_data = get_conversation_with_messages(db, conversation_id)
+        
+        if not conversation_data:
+            raise HTTPException(status_code=404, detail=f"Conversación {conversation_id} no encontrada")
+        
+        return conversation_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo conversación: {str(e)}")
+    finally:
+        if db:
+            db.close()
+
+
+@app.get("/analytics")
+async def get_analytics_data(days: int = 7):
+    """
+    📊 Obtener estadísticas y analytics del sistema
+    
+    Parámetros:
+    - days: Número de días para analytics diarios (default: 7)
+    
+    Retorna:
+    - Estadísticas globales
+    - Analytics diarios
+    - Artículos más consultados
+    """
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    
+    db = get_db_session()
+    try:
+        from crud import get_daily_analytics, get_most_queried_articles
+        
+        global_stats = get_global_stats(db)
+        daily_analytics = get_daily_analytics(db, days=days)
+        top_articles = get_most_queried_articles(db, limit=10, days=30)
+        
+        return {
+            "global": global_stats,
+            "daily": daily_analytics,
+            "top_articles": top_articles,
+            "period_days": days
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo analytics: {str(e)}")
+    finally:
+        if db:
+            db.close()
+
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int):
+    """
+    🗑️ Eliminar una conversación (solo para desarrollo/testing)
+    
+    Parámetros:
+    - conversation_id: ID de la conversación a eliminar
+    """
+    if not DB_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    
+    db = get_db_session()
+    try:
+        from crud import get_conversation
+        from models import Conversation
+        
+        conversation = get_conversation(db, conversation_id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail=f"Conversación {conversation_id} no encontrada")
+        
+        db.delete(conversation)
+        db.commit()
+        
+        return {"message": f"Conversación {conversation_id} eliminada correctamente"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error eliminando conversación: {str(e)}")
+    finally:
+        if db:
+            db.close()

@@ -673,6 +673,99 @@ body {
 }
 
 /* ============================================
+   HIGHLIGHTING DE ARTÍCULOS LEGALES
+   ============================================ */
+
+/* Resaltado para referencias a artículos del código penal */
+.article-highlight {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.3), rgba(245, 158, 11, 0.2));
+  color: #fbbf24;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+}
+
+.article-highlight:hover {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.5), rgba(245, 158, 11, 0.3));
+  border-color: rgba(251, 191, 36, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(251, 191, 36, 0.3);
+}
+
+/* Ícono indicador para artículos clicables */
+.article-highlight::before {
+  content: '§';
+  margin-right: 2px;
+  opacity: 0.7;
+  font-weight: 900;
+}
+
+/* Efecto de glow sutil */
+.article-highlight {
+  text-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
+}
+
+/* Animación al hacer clic */
+.article-highlight:active {
+  transform: scale(0.98);
+  box-shadow: 0 1px 2px rgba(251, 191, 36, 0.2);
+}
+
+/* Variante para artículos en títulos/encabezados */
+.markdown-content h1 .article-highlight,
+.markdown-content h2 .article-highlight,
+.markdown-content h3 .article-highlight,
+.markdown-content h4 .article-highlight {
+  font-size: 0.9em;
+  vertical-align: baseline;
+}
+
+/* Tooltip opcional al pasar el mouse (si se implementa después) */
+.article-highlight[data-article-info]:hover::after {
+  content: attr(data-article-info);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  white-space: nowrap;
+  z-index: 1000;
+  pointer-events: none;
+  opacity: 0;
+  animation: tooltipFadeIn 0.2s ease forwards;
+  box-shadow: var(--shadow-md);
+}
+
+@keyframes tooltipFadeIn {
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-5px);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .article-highlight {
+    padding: 1px 4px;
+    font-size: 0.95em;
+  }
+  
+  .article-highlight::before {
+    margin-right: 1px;
+  }
+}
+
+/* ============================================
    COMPARADOR DE ARTÍCULOS - MODAL
    ============================================ */
 

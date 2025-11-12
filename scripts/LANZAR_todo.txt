@@ -4,7 +4,7 @@
 
 PASO 1 + paso 2: Navegar al directorio del backend
 ------------------------------------------
-cd C:\agent-POL\backend-api && C:\agent-POL\.venv\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000
+cd C:\agent-POL\backend-api; C:\agent-POL\.venv\Scripts\uvicorn.exe main:app --reload --host 127.0.0.1 --port 8000
 
 
 

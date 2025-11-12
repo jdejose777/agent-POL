@@ -1,183 +1,363 @@
-# ⚖️ Agent POL - Asistente Jurídico de Derecho Penal Español
+# 🤖 Agent-POL - Sistema RAG para Código Penal Español# ⚖️ Agent POL - Asistente Jurídico de Derecho Penal Español
 
-Sistema RAG (Retrieval-Augmented Generation) especializado en consultas sobre el Código Penal español. Utiliza Vertex AI de Google Cloud y Pinecone para proporcionar respuestas precisas basadas en el texto oficial del Código Penal.
 
-## 🌟 Características Principales
 
-- **🎯 Búsqueda Híbrida**: Combina búsqueda exacta de artículos con búsqueda semántica
+Sistema de Recuperación-Generación Aumentada (RAG) para consultas sobre el Código Penal Español utilizando **Vertex AI (Google Cloud)**, **Pinecone**, **Redis** y **PostgreSQL**.Sistema RAG (Retrieval-Augmented Generation) especializado en consultas sobre el Código Penal español. Utiliza Vertex AI de Google Cloud y Pinecone para proporcionar respuestas precisas basadas en el texto oficial del Código Penal.
+
+
+
+---## 🌟 Características Principales
+
+
+
+## 📋 Tabla de Contenidos- **🎯 Búsqueda Híbrida**: Combina búsqueda exacta de artículos con búsqueda semántica
+
 - **📊 Respuestas Estructuradas**: Fichas legales con artículos, penas, explicación y resumen
-- **� Exactitud Mejorada**: Sistema que diferencia "Art. 142" de "Art. 142 bis"
-- **� Interfaz Moderna**: Chat responsive con renderizado Markdown
-- **🧠 IA Avanzada**: Google Vertex AI (text-embedding-004 + gemini-2.0-flash-001)
-- **⚡ Alto Rendimiento**: FastAPI + Pinecone para respuestas rápidas
 
-## 🏗️ Arquitectura del Sistema
+- [Características](#características)- **� Exactitud Mejorada**: Sistema que diferencia "Art. 142" de "Art. 142 bis"
 
-```
-agent-POL/
+- [Arquitectura](#arquitectura)- **� Interfaz Moderna**: Chat responsive con renderizado Markdown
+
+- [Estructura del Proyecto](#estructura-del-proyecto)- **🧠 IA Avanzada**: Google Vertex AI (text-embedding-004 + gemini-2.0-flash-001)
+
+- [Instalación](#instalación)- **⚡ Alto Rendimiento**: FastAPI + Pinecone para respuestas rápidas
+
+- [Uso](#uso)
+
+- [Documentación](#documentación)## 🏗️ Arquitectura del Sistema
+
+- [Testing](#testing)
+
+- [API Endpoints](#api-endpoints)```
+
+- [Tecnologías](#tecnologías)agent-POL/
+
 ├── backend-api/                   # API FastAPI con Vertex AI
-│   ├── main.py                   # API principal con lógica RAG
-│   ├── requirements.txt          # Dependencias Python
-│   └── .env                      # Variables de entorno (no incluido)
-├── backend-procesamiento/        # Procesador de PDFs (legacy)
-│   └── procesar-pdf.py          # Script de carga inicial
-├── frontend/                     # Interfaz de usuario
-│   ├── index.html               # Estructura HTML
-│   ├── style.css                # Estilos con tema oscuro
-│   └── app.js                   # Lógica del chat con Markdown
-└── README.md                    # Este archivo
-```
 
-## 🚀 Inicio Rápido
+---│   ├── main.py                   # API principal con lógica RAG
+
+│   ├── requirements.txt          # Dependencias Python
+
+## ✨ Características│   └── .env                      # Variables de entorno (no incluido)
+
+├── backend-procesamiento/        # Procesador de PDFs (legacy)
+
+### 🚀 **Core Features**│   └── procesar-pdf.py          # Script de carga inicial
+
+- ✅ **RAG con Vertex AI**: Generación de respuestas con Gemini 2.0 Flash├── frontend/                     # Interfaz de usuario
+
+- ✅ **Embeddings de Google**: text-embedding-004 para búsqueda semántica│   ├── index.html               # Estructura HTML
+
+- ✅ **Vector Database**: Pinecone para almacenamiento de embeddings│   ├── style.css                # Estilos con tema oscuro
+
+- ✅ **Caché Persistente**: Redis para artículos consultados frecuentemente│   └── app.js                   # Lógica del chat con Markdown
+
+- ✅ **Historial Completo**: PostgreSQL para conversaciones y analytics└── README.md                    # Este archivo
+
+- ✅ **Búsqueda Instantánea**: Caché O(1) para 711 artículos en memoria```
+
+- ✅ **Búsqueda Exacta**: Regex sobre PDF completo del Código Penal
+
+- ✅ **Expansión Semántica**: Sinónimos legales automáticos## 🚀 Inicio Rápido
+
+- ✅ **Memoria Conversacional**: Historial de chat con contexto
 
 ### 1. Requisitos Previos
-- Python 3.13+
-- Cuenta de Google Cloud con Vertex AI habilitado
-- Cuenta de Pinecone
-- Git
 
-### 2. Clonar el Repositorio
+### 🔍 **Funcionalidades Avanzadas**- Python 3.13+
+
+- ⚖️ **Comparador de Artículos**: Análisis comparativo entre artículos- Cuenta de Google Cloud con Vertex AI habilitado
+
+- 📊 **Dashboard de Analytics**: Estadísticas de uso en tiempo real- Cuenta de Pinecone
+
+- 🔄 **Reconstrucción Inteligente**: Reensambla artículos largos fragmentados- Git
+
+- 🎯 **Validación Bidireccional**: Corrige errores comunes del usuario
+
+- 📈 **Métricas de Performance**: Tracking de tiempos de respuesta y tokens### 2. Clonar el Repositorio
+
 ```bash
-git clone https://github.com/jdejose777/agent-POL.git
+
+---git clone https://github.com/jdejose777/agent-POL.git
+
 cd agent-POL
-```
 
-### 3. Configurar el Backend
+## 🏗️ Arquitectura```
 
-#### Crear entorno virtual
+
+
+```### 3. Configurar el Backend
+
+┌─────────────┐      ┌──────────────┐      ┌─────────────┐
+
+│   Frontend  │────▶ │  Backend API │────▶ │  Vertex AI  │#### Crear entorno virtual
+
+│   (HTML/JS) │      │   (FastAPI)  │      │  (Gemini)   │```bash
+
+└─────────────┘      └──────────────┘      └─────────────┘cd backend-api
+
+                            │python -m venv .venv
+
+                            ├────▶ Pinecone (Vector DB).venv\Scripts\activate  # Windows
+
+                            ├────▶ Redis (Cache)# o source .venv/bin/activate  # Mac/Linux
+
+                            ├────▶ PostgreSQL (History)```
+
+                            └────▶ PDF Local (Exact Search)
+
+```#### Instalar dependencias
+
 ```bash
-cd backend-api
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# o source .venv/bin/activate  # Mac/Linux
+
+---pip install -r requirements.txt
+
 ```
 
-#### Instalar dependencias
-```bash
-pip install -r requirements.txt
-```
+## 📁 Estructura del Proyecto
 
 #### Configurar variables de entorno
-Crea un archivo `.env` en `backend-api/`:
-```env
-PINECONE_API_KEY=tu-clave-pinecone
-PINECONE_INDEX_NAME=codigo-penal-vertex-ai
-PINECONE_ENVIRONMENT=us-east-1
-GOOGLE_CLOUD_PROJECT=tu-proyecto-gcp
-GOOGLE_CLOUD_LOCATION=us-central1
+
+```Crea un archivo `.env` en `backend-api/`:
+
+agent-POL/```env
+
+│PINECONE_API_KEY=tu-clave-pinecone
+
+├── 📂 backend-api/              # API principal (FastAPI)PINECONE_INDEX_NAME=codigo-penal-vertex-ai
+
+├── 📂 frontend/                 # Interfaz webPINECONE_ENVIRONMENT=us-east-1
+
+├── 📂 tests/                    # Tests unitarios (25 tests)GOOGLE_CLOUD_PROJECT=tu-proyecto-gcp
+
+├── 📂 scripts/                  # Scripts utilitariosGOOGLE_CLOUD_LOCATION=us-central1
+
+├── 📂 docs/                     # Documentación completa```
+
+├── 📂 config/                   # Archivos de configuración
+
+├── 📂 documentos/               # Documentos fuente#### Iniciar el servidor
+
+└── 📂 logs/                     # Logs de la aplicación```bash
+
+```uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
 ```
 
-#### Iniciar el servidor
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
+---
 
 El servidor estará disponible en `http://localhost:8000`
 
+## 🚀 Instalación Rápida
+
 ### 4. Configurar el Frontend
 
-Abre `frontend/index.html` en tu navegador. El frontend ya está configurado para conectarse a `http://localhost:8000`.
+```bash
 
-## ⚙️ Configuración Detallada
+# 1. Clonar repositorioAbre `frontend/index.html` en tu navegador. El frontend ya está configurado para conectarse a `http://localhost:8000`.
 
-### Backend (FastAPI + Vertex AI)
+git clone https://github.com/jdejose777/agent-POL.git
 
-**Variables de entorno obligatorias:**
+cd agent-POL## ⚙️ Configuración Detallada
+
+
+
+# 2. Crear entorno virtual### Backend (FastAPI + Vertex AI)
+
+python -m venv .venv
+
+.venv\Scripts\activate**Variables de entorno obligatorias:**
+
 - `PINECONE_API_KEY`: Tu API key de Pinecone
-- `PINECONE_INDEX_NAME`: Nombre del índice (por defecto: `codigo-penal-vertex-ai`)
-- `GOOGLE_CLOUD_PROJECT`: ID de tu proyecto en Google Cloud
-- `GOOGLE_CLOUD_LOCATION`: Región de Vertex AI (por defecto: `us-central1`)
 
-**Modelos utilizados:**
+# 3. Instalar dependencias- `PINECONE_INDEX_NAME`: Nombre del índice (por defecto: `codigo-penal-vertex-ai`)
+
+cd backend-api- `GOOGLE_CLOUD_PROJECT`: ID de tu proyecto en Google Cloud
+
+pip install -r requirements.txt- `GOOGLE_CLOUD_LOCATION`: Región de Vertex AI (por defecto: `us-central1`)
+
+
+
+# 4. Configurar .env (copiar de .env.example)**Modelos utilizados:**
+
 - **Embeddings**: `text-embedding-004` (768 dimensiones)
-- **Generación**: `gemini-2.0-flash-001`
 
-**Parámetros RAG:**
-- Chunk size: 800 caracteres
-- Chunk overlap: 100 caracteres
-- Top K: 10 resultados
-- Umbral de similitud: 0.35 (artículos específicos) / 0.45 (consultas generales)
+# 5. Iniciar servicios (Docker)- **Generación**: `gemini-2.0-flash-001`
 
-### Frontend (HTML/CSS/JS)
+docker run -d -p 6379:6379 --name redis-cache redis:latest
+
+docker run -d -p 5432:5432 --name postgres-agentpol \**Parámetros RAG:**
+
+  -e POSTGRES_PASSWORD=agentpol2025 \- Chunk size: 800 caracteres
+
+  -e POSTGRES_USER=agentpol \- Chunk overlap: 100 caracteres
+
+  -e POSTGRES_DB=conversations_db \- Top K: 10 resultados
+
+  postgres:16-alpine- Umbral de similitud: 0.35 (artículos específicos) / 0.45 (consultas generales)
+
+
+
+# 6. Iniciar backend### Frontend (HTML/CSS/JS)
+
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 **Características:**
-- Renderizado Markdown con `marked.js`
-- Tema oscuro profesional
-- Diseño responsive
+
+# 7. Abrir frontend- Renderizado Markdown con `marked.js`
+
+start chrome ../frontend/index.html- Tema oscuro profesional
+
+```- Diseño responsive
+
 - Indicador de "escribiendo..."
-- Scroll automático
 
-**Para cambiar la URL del backend**, edita `frontend/app.js`:
+---- Scroll automático
+
+
+
+## 📚 Documentación Completa**Para cambiar la URL del backend**, edita `frontend/app.js`:
+
 ```javascript
-const API_URL = 'http://localhost:8000/query'; // Cambia si es necesario
-```
 
-## 🛠️ Tecnologías Utilizadas
+| Documento | Descripción |const API_URL = 'http://localhost:8000/query'; // Cambia si es necesario
 
-### Backend
+|-----------|-------------|```
+
+| [POSTGRESQL_INTEGRATION.md](POSTGRESQL_INTEGRATION.md) | PostgreSQL: instalación, modelos, queries |
+
+| [REDIS_INTEGRATION.md](REDIS_INTEGRATION.md) | Redis: configuración, testing, monitoreo |## 🛠️ Tecnologías Utilizadas
+
+| [SISTEMA-VERTEX-AI.md](SISTEMA-VERTEX-AI.md) | Integración con Vertex AI |
+
+| [COMPARADOR_USO.md](COMPARADOR_USO.md) | Uso del comparador de artículos |### Backend
+
 - **Python 3.13** - Lenguaje principal
-- **FastAPI** - Framework web moderno y rápido
+
+---- **FastAPI** - Framework web moderno y rápido
+
 - **Google Vertex AI** - Embeddings y generación con Gemini
-- **Pinecone** - Base de datos vectorial (1,146 vectores del Código Penal)
+
+## 🌐 API Endpoints- **Pinecone** - Base de datos vectorial (1,146 vectores del Código Penal)
+
 - **PyPDF2** - Procesamiento de PDFs
-- **LangChain** - División de texto en chunks
 
-### Frontend
-- **HTML5 & CSS3** - Estructura y estilos
-- **JavaScript ES6+** - Lógica de la aplicación
-- **Marked.js** - Renderizado de Markdown
-- **Fetch API** - Comunicación con el backend
+```http- **LangChain** - División de texto en chunks
 
-### Infraestructura
+POST   /chat                    # Consulta con memoria conversacional
+
+GET    /comparar?art1=X&art2=Y  # Comparar artículos### Frontend
+
+GET    /conversations           # Lista de conversaciones- **HTML5 & CSS3** - Estructura y estilos
+
+GET    /conversations/{id}      # Detalle de conversación- **JavaScript ES6+** - Lógica de la aplicación
+
+GET    /analytics               # Estadísticas de uso- **Marked.js** - Renderizado de Markdown
+
+GET    /health                  # Estado del sistema- **Fetch API** - Comunicación con el backend
+
+GET    /docs                    # Documentación Swagger
+
+```### Infraestructura
+
 - **Google Cloud Platform** - Hosting de Vertex AI
-- **Pinecone Cloud** - Base de datos vectorial (us-east-1)
 
-## 📋 Flujo de Trabajo
+---- **Pinecone Cloud** - Base de datos vectorial (us-east-1)
 
-### Consulta de Artículo Específico
-1. Usuario pregunta: "artículo 142"
-2. Sistema detecta número de artículo con regex
+
+
+## 🧪 Testing## 📋 Flujo de Trabajo
+
+
+
+```bash### Consulta de Artículo Específico
+
+# Todos los tests (25 tests)1. Usuario pregunta: "artículo 142"
+
+pytest -v2. Sistema detecta número de artículo con regex
+
 3. Búsqueda exacta en Pinecone (evita confusión con "142 bis")
-4. Respuesta con texto literal del artículo
+
+# Tests de Redis (10 tests)4. Respuesta con texto literal del artículo
+
+pytest tests/test_redis_cache.py -v
 
 ### Consulta Conceptual
-1. Usuario pregunta: "violación a menor de 14 años"
-2. Enriquecimiento de consulta con sinónimos legales
+
+# Tests de PostgreSQL (15 tests)1. Usuario pregunta: "violación a menor de 14 años"
+
+pytest tests/test_postgresql.py -v2. Enriquecimiento de consulta con sinónimos legales
+
 3. Generación de embedding con Vertex AI
-4. Búsqueda semántica en Pinecone (Top 10)
-5. Filtrado adaptativo por similitud
-6. Generación de ficha estructurada con Gemini:
+
+# Test interactivo4. Búsqueda semántica en Pinecone (Top 10)
+
+python scripts/test_redis_interactive.py5. Filtrado adaptativo por similitud
+
+```6. Generación de ficha estructurada con Gemini:
+
    - **Título del delito**
-   - **Artículos relevantes** (máx. 5)
+
+---   - **Artículos relevantes** (máx. 5)
+
    - **Penas aplicables** (con números: "1 a 6 años")
-   - **Explicación legal** (diferencia dolo/imprudencia)
+
+## 🛠️ Stack Tecnológico   - **Explicación legal** (diferencia dolo/imprudencia)
+
    - **Resumen final** (fórmula + rango de penas)
 
-## 🎯 Mejoras Implementadas
+**Backend:** FastAPI, SQLAlchemy, Redis, PostgreSQL  
 
-### Sistema Híbrido de Búsqueda
+**AI/ML:** Vertex AI, Gemini 2.0, text-embedding-004, Pinecone  ## 🎯 Mejoras Implementadas
+
+**Frontend:** HTML5, CSS3, JavaScript  
+
+**DevOps:** Docker, Pytest, Git### Sistema Híbrido de Búsqueda
+
 - ✅ Búsqueda exacta de artículos por número (regex)
-- ✅ Soporte para artículos bis, ter, quater
+
+---- ✅ Soporte para artículos bis, ter, quater
+
 - ✅ Fallback a búsqueda semántica si no hay coincidencia exacta
 
+## 📊 Performance
+
 ### Formato de Respuestas
-- ✅ Fichas estructuradas con Markdown
-- ✅ Títulos y subtítulos jerarquizados (##, ###)
-- ✅ Listas con bullets para mejor legibilidad
-- ✅ Negritas en conceptos clave
-- ✅ Penas expresadas con números (no letras)
 
-### Precisión Legal
+| Operación | Tiempo |- ✅ Fichas estructuradas con Markdown
+
+|-----------|--------|- ✅ Títulos y subtítulos jerarquizados (##, ###)
+
+| Redis cache | ~2ms |- ✅ Listas con bullets para mejor legibilidad
+
+| Memoria cache | <1ms |- ✅ Negritas en conceptos clave
+
+| Búsqueda PDF | ~10ms |- ✅ Penas expresadas con números (no letras)
+
+| Búsqueda semántica | ~50ms |
+
+| Generación completa | 1-5s |### Precisión Legal
+
 - ✅ Diferenciación entre dolo (intención) e imprudencia
-- ✅ Aplicación de artículos por analogía si es necesario
-- ✅ Terminología legal precisa (sin vaguedades)
-- ✅ Tono técnico similar a informes jurídicos
 
-### Frontend Mejorado
+---- ✅ Aplicación de artículos por analogía si es necesario
+
+- ✅ Terminología legal precisa (sin vaguedades)
+
+## 👤 Autor- ✅ Tono técnico similar a informes jurídicos
+
+
+
+**jdejose777** - [GitHub](https://github.com/jdejose777)### Frontend Mejorado
+
 - ✅ Renderizado completo de Markdown
-- ✅ Estilos para tablas, código, listas, encabezados
+
+---- ✅ Estilos para tablas, código, listas, encabezados
+
 - ✅ Tema oscuro profesional
-- ✅ Mensajes escaneables en 10-15 segundos
+
+**⚡ Hecho con FastAPI, Vertex AI y mucho ☕**- ✅ Mensajes escaneables en 10-15 segundos
+
 
 ## 📊 Datos del Sistema
 
